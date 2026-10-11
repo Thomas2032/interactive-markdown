@@ -1,0 +1,44 @@
+{
+  "name": "interactive-markdown",
+  "version": "1.0.0",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG sliders and timers",
+  "main": "index.js",
+  "directories": {
+    "example": "examples",
+    "test": "test"
+  },
+  "scripts": {
+    "start": "serve .",
+    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs",
+    "test:expr": "node test/smoke-expr.mjs",
+    "test:parse": "node test/smoke-parse-ivm.mjs",
+    "test:sanitize": "node test/smoke-sanitize-svg.mjs",
+    "test:render": "node test/smoke-render.mjs",
+    "test:markdown": "node test/smoke-markdown.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Thomas2032/interactive-markdown.git"
+  },
+  "keywords": [
+    "markdown",
+    "svg",
+    "interactive",
+    "ivm",
+    "editor"
+  ],
+  "author": "Thomas Lo",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Thomas2032/interactive-markdown/issues"
+  },
+  "homepage": "https://github.com/Thomas2032/interactive-markdown#readme",
+  "devDependencies": {
+    "linkedom": "^0.18.13",
+    "serve": "^14.2.6"
+  },
+  "type": "module",
+  "dependencies": {
+    "marked": "^18.1.0"
+  }
+}
