@@ -24,12 +24,13 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
+  overflow: hidden;
 }
 
 body {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100%;
 }
 
 .app-header {
@@ -101,14 +102,15 @@ body {
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 @media (max-width: 900px) {
   .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 45vh 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 45vh) minmax(0, 1fr);
   }
 }
 
@@ -116,6 +118,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   border-right: 1px solid var(--border);
 }
 
@@ -133,9 +137,17 @@ body {
   background: #0c1424;
 }
 
-#editor {
+.editor-scroll {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+#editor {
+  display: block;
   width: 100%;
+  min-height: 100%;
+  margin: 0;
   resize: none;
   border: 0;
   outline: none;
@@ -146,6 +158,8 @@ body {
   font-size: 0.9rem;
   line-height: 1.45;
   tab-size: 2;
+  field-sizing: content;
+  overflow: hidden;
 }
 
 #preview {
