@@ -425,7 +425,8 @@ body {
 }
 
 .im-graph-bar button,
-.im-graph-kind-label select {
+.im-graph-kind-label select,
+.im-graph-kind-label input {
   font: inherit;
   font-size: 0.8rem;
   border-radius: 8px;
@@ -448,12 +449,28 @@ body {
   cursor: default;
 }
 
+.im-graph-motion-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.im-graph-motion-bar[hidden] {
+  display: none !important;
+}
+
 .im-graph-kind-label {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+.im-graph-kind-label input {
+  width: 4.5rem;
+  cursor: text;
 }
 
 .im-graph-count {
@@ -523,6 +540,54 @@ body {
 .im-graph-edge.is-selected {
   stroke: #dbe4ff;
   stroke-width: 2.4;
+}
+
+.im-graph-edge.is-animated {
+  stroke-dasharray: 6 8;
+  animation: im-graph-march 1.2s linear infinite;
+}
+
+.im-graph-edge.is-animated.is-reverse {
+  animation-direction: reverse;
+}
+
+.im-graph-motion {
+  pointer-events: none;
+}
+
+.im-graph-stage.is-animated .im-graph-node {
+  animation: im-graph-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes im-graph-march {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes im-graph-pulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28), 0 0 0 0 rgba(56, 189, 248, 0);
+  }
+  50% {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28), 0 0 0 4px rgba(56, 189, 248, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .im-graph-edge.is-animated,
+  .im-graph-stage.is-animated .im-graph-node {
+    animation: none;
+  }
+
+  .im-graph-edge.is-animated {
+    stroke-dasharray: none;
+  }
+
+  .im-graph-motion {
+    display: none;
+  }
 }
 
 .im-graph-edge-temp {
@@ -627,29 +692,42 @@ body {
 
 .im-graph-port {
   position: absolute;
-  top: 50%;
   z-index: 2;
   width: 12px;
   height: 12px;
-  margin-top: -6px;
   padding: 0;
   border: 2px solid #8ea2d8;
   border-radius: 50%;
   background: #0f172a;
-}
-
-.im-graph-port-in {
-  left: -6px;
-  pointer-events: none;
-}
-
-.im-graph-port-out {
-  right: -6px;
   cursor: crosshair;
 }
 
-.im-graph-port-out:hover,
-.im-graph-port-out:focus-visible {
+.im-graph-port-left {
+  top: 50%;
+  left: -6px;
+  margin-top: -6px;
+}
+
+.im-graph-port-right {
+  top: 50%;
+  right: -6px;
+  margin-top: -6px;
+}
+
+.im-graph-port-top {
+  top: -6px;
+  left: 50%;
+  margin-left: -6px;
+}
+
+.im-graph-port-bottom {
+  bottom: -6px;
+  left: 50%;
+  margin-left: -6px;
+}
+
+.im-graph-port:hover,
+.im-graph-port:focus-visible {
   background: #38bdf8;
   border-color: #e0f2fe;
 }
@@ -681,6 +759,92 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
+}
+
+.im-doc-add {
+  position: relative;
+}
+
+.im-doc-menu {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 14rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.im-doc-menu[hidden] {
+  display: none !important;
+}
+
+.im-doc-menu-group + .im-doc-menu-group {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+}
+
+.im-doc-menu-label {
+  margin: 0.15rem 0.45rem 0.25rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.im-doc-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.im-doc.is-dragging,
+.im-doc.is-dragging .im-doc-menu button {
+  cursor: grabbing;
+}
+
+.im-doc-drag-ghost {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.8rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.im-doc-drag-ghost[hidden],
+.im-doc-snap[hidden] {
+  display: none !important;
+}
+
+.im-doc-snap {
+  position: fixed;
+  z-index: 15;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+}
+
+.im-doc-block.is-snap-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .im-doc-bar button,

@@ -86,15 +86,14 @@ assert("text input present", !!preview.querySelector('input[type="text"]'));
 m2.destroy();
 const agent = readFileSync(new URL("../examples/agent-loop.md", import.meta.url), "utf8");
 const agentMount = renderDocument(preview, agent, { marked });
-const fig = svgScope(preview).innerHTML || "";
-assert("agent loop svg", !!svgScope(preview).querySelector("svg"));
-assert("agent loop keyframes", /@keyframes\s+march/.test(fig), fig.slice(0, 300));
-assert("agent loop motion", /animateMotion/i.test(fig));
-assert("agent loop filter", /feGaussianBlur/i.test(fig));
-assert("agent loop symbol use", /<use\b/i.test(fig) && /href="#i-bolt"/.test(fig), fig);
-assert("agent loop stage", !!preview.querySelector(".im-ivm-static"));
-const withoutNs = fig.replaceAll('xmlns="http://www.w3.org/2000/svg"', "");
-assert("agent loop has no remote url", !/https?:\/\//i.test(withoutNs), withoutNs);
+assert("agent loop canvas", !!preview.querySelector(".im-graph-canvas"));
+assert("agent loop nodes", preview.querySelectorAll(".im-graph-node").length === 8);
+assert("agent loop top port", preview.querySelectorAll(".im-graph-port-top").length === 8);
+assert("agent loop bottom port", preview.querySelectorAll(".im-graph-port-bottom").length === 8);
+assert("agent loop dots", preview.querySelectorAll("animateMotion").length === 3 * 8);
+assert("agent loop motion bar", !!preview.querySelector('.im-graph-motion-bar [data-motion="quantity"]'));
+const agentSvg = preview.querySelector(".im-graph-edges")?.outerHTML || "";
+assert("agent loop has no remote url", !/https?:\/\//i.test(agentSvg), agentSvg.slice(0, 200));
 agentMount.destroy();
 
 // plain md only

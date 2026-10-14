@@ -28,18 +28,31 @@ const SHAPE_FIELDS = {
   text: ["x", "y", "fill", "font-size", "text"],
 };
 
-const ADD_BUTTONS = [
-  ["heading", "Heading"],
-  ["paragraph", "Paragraph"],
-  ["bullets", "Bullets"],
-  ["slider", "Slider"],
-  ["timer", "Timer"],
-  ["input", "Text field"],
-  ["toggle", "Toggle"],
-  ["formula", "Formula"],
-  ["shape", "Shape"],
-  ["graph", "Graph"],
-  ["animated", "Animated figure"],
+const ADD_GROUPS = [
+  {
+    label: "Markdown",
+    items: [
+      ["heading", "Heading"],
+      ["paragraph", "Paragraph"],
+      ["bullets", "Bullets"],
+    ],
+  },
+  {
+    label: "Interactive",
+    items: [
+      ["slider", "Slider"],
+      ["timer", "Timer"],
+      ["input", "Text field"],
+      ["toggle", "Toggle"],
+      ["formula", "Formula"],
+      ["shape", "Shape: rect", "rect"],
+      ["shape", "Shape: circle", "circle"],
+      ["shape", "Shape: line", "line"],
+      ["shape", "Shape: path", "path"],
+      ["shape", "Shape: text", "text"],
+      ["graph", "Graph"],
+    ],
+  },
 ];
 
 /**
@@ -56,6 +69,9 @@ export function mountDocumentEditor(container, source, options = {}) {
   /** @type {Map<string, { destroy: () => void }>} */
   const mounts = new Map();
   let dead = false;
+  /** @type {{ pointerId: number, x: number, y: number, feature: string, shape: string, label: string, active: boolean, at?: number, figureId: string | null } | null} */
+  let drag = null;
+  let suppressClick = false;
 
   container.innerHTML = "";
   const root = docEl.createElement("div");
@@ -63,50 +79,79 @@ export function mountDocumentEditor(container, source, options = {}) {
 
   const bar = docEl.createElement("div");
   bar.className = "im-doc-bar";
-  for (const [feature, label] of ADD_BUTTONS) {
-    const button = docEl.createElement("button");
-    button.type = "button";
-    button.dataset.add = feature;
-    button.textContent = label;
-    bar.appendChild(button);
-    if (feature === "shape") {
-      const select = docEl.createElement("select");
-      select.dataset.shapeKind = "rect";
-      for (const kind of ["rect", "circle", "line", "path", "text"]) {
-        const option = docEl.createElement("option");
-        option.value = kind;
-        option.textContent = kind;
-        if (kind === "rect") option.setAttribute("selected", "");
-        select.appendChild(option);
-      }
-      bar.appendChild(select);
+  const addWrap = docEl.createElement("div");
+  addWrap.className = "im-doc-add";
+  const addToggle = docEl.createElement("button");
+  addToggle.type = "button";
+  addToggle.className = "im-doc-add-toggle";
+  addToggle.dataset.menuToggle = "add";
+  addToggle.setAttribute("aria-haspopup", "menu");
+  addToggle.setAttribute("aria-expanded", "false");
+  addToggle.textContent = "Add";
+  const menu = docEl.createElement("div");
+  menu.className = "im-doc-menu";
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+  for (const group of ADD_GROUPS) {
+    const section = docEl.createElement("div");
+    section.className = "im-doc-menu-group";
+    const label = docEl.createElement("div");
+    label.className = "im-doc-menu-label";
+    label.textContent = group.label;
+    section.appendChild(label);
+    for (const [feature, itemLabel, shape] of group.items) {
+      const button = docEl.createElement("button");
+      button.type = "button";
+      button.dataset.add = feature;
+      if (shape) button.dataset.shape = shape;
+      button.textContent = itemLabel;
+      section.appendChild(button);
     }
+    menu.appendChild(section);
   }
+  addWrap.append(addToggle, menu);
+  bar.appendChild(addWrap);
 
-  const help = docEl.createElement("p");
-  help.className = "im-doc-help";
-  help.textContent = "Prose stays formatted text. Sliders, figures, and graphs stay blocks. Labels and expressions are typed in the block.";
+  const closeMenu = () => {
+    menu.hidden = true;
+    addToggle.setAttribute("aria-expanded", "false");
+  };
+  const onDocPointer = (event) => {
+    if (menu.hidden || addWrap.contains(event.target)) return;
+    closeMenu();
+  };
+  docEl.addEventListener("pointerdown", onDocPointer);
 
   const empty = docEl.createElement("p");
   empty.className = "im-doc-empty";
-  empty.textContent = "Add a heading, a control, a shape, or a graph.";
+  empty.textContent = "Drag from Add to place a heading, a control, a shape, or a graph.";
 
   const blocksEl = docEl.createElement("div");
   blocksEl.className = "im-doc-blocks";
 
-  root.append(bar, help, empty, blocksEl);
+  root.append(bar, empty, blocksEl);
+  const ghost = docEl.createElement("div");
+  ghost.className = "im-doc-drag-ghost";
+  ghost.hidden = true;
+  const guide = docEl.createElement("div");
+  guide.className = "im-doc-snap";
+  guide.hidden = true;
+  root.append(ghost, guide);
   container.appendChild(root);
 
   root.addEventListener("click", onClick);
   root.addEventListener("input", onField);
   root.addEventListener("change", onField);
   root.addEventListener("focusout", onBlur);
+  menu.addEventListener("pointerdown", onMenuPointerDown);
 
   paint();
 
   return {
     destroy() {
       dead = true;
+      endDragListeners();
+      docEl.removeEventListener("pointerdown", onDocPointer);
       destroyMounts();
       root.remove();
     },
@@ -129,16 +174,30 @@ export function mountDocumentEditor(container, source, options = {}) {
     empty.hidden = doc.blocks.length > 0;
     /** @type {object[]} */
     let prose = [];
+    let proseStart = 0;
+    let index = 0;
     const flush = () => {
       if (!prose.length) return;
-      blocksEl.appendChild(renderProse(prose));
+      const el = renderProse(prose);
+      el.dataset.at = String(proseStart);
+      el.dataset.atEnd = String(index);
+      blocksEl.appendChild(el);
       prose = [];
     };
     for (const block of doc.blocks) {
       if (block.type === "figure" || block.type === "graph") {
         flush();
-        blocksEl.appendChild(renderBlock(block));
-      } else prose.push(block);
+        const el = renderBlock(block);
+        el.dataset.at = String(index);
+        el.dataset.atEnd = String(index + 1);
+        if (block.type === "figure") el.dataset.figureId = block.id;
+        blocksEl.appendChild(el);
+        index++;
+      } else {
+        if (!prose.length) proseStart = index;
+        prose.push(block);
+        index++;
+      }
     }
     flush();
   }
@@ -181,6 +240,9 @@ export function mountDocumentEditor(container, source, options = {}) {
       actionButton("move", "Down", { delta: "1", disabled: index < 0 || index >= doc.blocks.length - 1 }),
       actionButton("remove-block", "Remove", null)
     );
+    if (block.type === "graph" && !block.model?.animated) {
+      row.append(actionButton("add-animation", "Add animation", null));
+    }
     el.appendChild(row);
 
     if (block.id === selectedId) el.appendChild(renderInspector(block));
@@ -244,7 +306,19 @@ export function mountDocumentEditor(container, source, options = {}) {
       box.appendChild(field("One item per line", area));
       return box;
     }
-    if (block.type === "graph") return box;
+    if (block.type === "graph") {
+      if (block.model?.animated) {
+        const note = docEl.createElement("p");
+        note.className = "im-doc-help";
+        note.textContent = "Dashes and dots run on this canvas. Path, quantity, direction, and seconds are on the canvas.";
+        const remove = docEl.createElement("button");
+        remove.type = "button";
+        remove.dataset.action = "remove-animation";
+        remove.textContent = "Remove animation";
+        box.append(note, remove);
+      }
+      return box;
+    }
     if (block.type === "figure") {
       const ns = input("text", block.namespace || "");
       ns.dataset.field = "namespace";
@@ -417,13 +491,15 @@ export function mountDocumentEditor(container, source, options = {}) {
    */
   function mountLive(block, host) {
     if (block.type === "graph") {
-      const mounted = mountGraphEditor(host, block.model || { nodes: [], edges: [] }, {
-        onChange(model) {
-          doc = { blocks: updateBlock(doc, block.id, { model }).blocks };
-          commit();
-        },
-      });
-      mounts.set(block.id, mounted);
+      mounts.set(
+        block.id,
+        mountGraphEditor(host, block.model || { nodes: [], edges: [] }, {
+          onChange(model) {
+            doc = { blocks: updateBlock(doc, block.id, { model }).blocks };
+            commit();
+          },
+        })
+      );
       return;
     }
     mounts.set(block.id, mountIvm(host, serializeFigure(block)));
@@ -446,21 +522,186 @@ export function mountDocumentEditor(container, source, options = {}) {
   }
 
   /**
+   * @param {PointerEvent} event
+   */
+  function onMenuPointerDown(event) {
+    const target = event.target;
+    const button = target && target.closest ? target.closest("[data-add]") : null;
+    if (!button || !menu.contains(button) || event.button !== 0) return;
+    drag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      feature: button.dataset.add || "",
+      shape: button.dataset.shape || "",
+      label: button.textContent || "",
+      active: false,
+      figureId: null,
+    };
+    docEl.addEventListener("pointermove", onMenuPointerMove);
+    docEl.addEventListener("pointerup", onMenuPointerUp);
+    docEl.addEventListener("pointercancel", onMenuPointerUp);
+  }
+
+  /**
+   * @param {PointerEvent} event
+   */
+  function onMenuPointerMove(event) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.active) {
+      if (dx * dx + dy * dy < 36) return;
+      drag.active = true;
+      suppressClick = true;
+      closeMenu();
+      ghost.textContent = drag.label;
+      ghost.hidden = false;
+      root.classList.add("is-dragging");
+    }
+    ghost.style.left = event.clientX + 12 + "px";
+    ghost.style.top = event.clientY + 12 + "px";
+    updateSnap(event.clientX, event.clientY);
+  }
+
+  /**
+   * @param {PointerEvent} event
+   */
+  function onMenuPointerUp(event) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const active = drag.active;
+    const feature = drag.feature;
+    const shape = drag.shape;
+    const at = drag.at;
+    const figureId = drag.figureId;
+    clearDrag();
+    if (!active) return;
+    addFeature(feature, shape || undefined, { at, figureId });
+  }
+
+  function endDragListeners() {
+    docEl.removeEventListener("pointermove", onMenuPointerMove);
+    docEl.removeEventListener("pointerup", onMenuPointerUp);
+    docEl.removeEventListener("pointercancel", onMenuPointerUp);
+  }
+
+  function clearDrag() {
+    drag = null;
+    ghost.hidden = true;
+    guide.hidden = true;
+    root.classList.remove("is-dragging");
+    for (const el of blocksEl.querySelectorAll(".is-snap-target")) el.classList.remove("is-snap-target");
+    endDragListeners();
+  }
+
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
+  function updateSnap(x, y) {
+    if (!drag) return;
+    for (const el of blocksEl.querySelectorAll(".is-snap-target")) el.classList.remove("is-snap-target");
+    const figureId = figureUnder(x, y, drag.feature);
+    if (figureId) {
+      drag.figureId = figureId;
+      drag.at = undefined;
+      guide.hidden = true;
+      blocksEl.querySelector(`[data-figure-id="${figureId}"]`)?.classList.add("is-snap-target");
+      return;
+    }
+    const slot = nearestGap(y);
+    drag.figureId = null;
+    drag.at = slot.at;
+    const area = blocksEl.getBoundingClientRect();
+    guide.hidden = false;
+    guide.style.left = area.left + "px";
+    guide.style.width = Math.max(area.width, 40) + "px";
+    guide.style.top = slot.y + "px";
+  }
+
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @param {string} feature
+   */
+  function figureUnder(x, y, feature) {
+    const attachable =
+      feature === "slider" ||
+      feature === "timer" ||
+      feature === "input" ||
+      feature === "toggle" ||
+      feature === "formula" ||
+      feature === "shape";
+    if (!attachable || typeof docEl.elementFromPoint !== "function") return null;
+    const hit = docEl.elementFromPoint(x, y);
+    const blockEl = hit && hit.closest ? hit.closest(".im-doc-block[data-figure-id]") : null;
+    if (!blockEl || !blocksEl.contains(blockEl)) return null;
+    const rect = blockEl.getBoundingClientRect();
+    const margin = Math.min(18, rect.height * 0.2);
+    if (y < rect.top + margin || y > rect.bottom - margin) return null;
+    return blockEl.dataset.figureId || null;
+  }
+
+  /**
+   * @param {number} clientY
+   */
+  function nearestGap(clientY) {
+    const children = [...blocksEl.querySelectorAll(":scope > .im-doc-prose, :scope > .im-doc-block")];
+    /** @type {{ at: number, y: number }[]} */
+    const slots = [];
+    if (!children.length) {
+      const rect = (empty.hidden ? blocksEl : empty).getBoundingClientRect();
+      slots.push({ at: doc.blocks.length, y: rect.top + 8 });
+    } else {
+      for (const child of children) {
+        const rect = child.getBoundingClientRect();
+        slots.push({ at: Number(child.dataset.at), y: rect.top });
+      }
+      const last = children[children.length - 1];
+      const lastRect = last.getBoundingClientRect();
+      slots.push({ at: Number(last.dataset.atEnd), y: lastRect.bottom });
+    }
+    let best = slots[0];
+    let bestDist = Infinity;
+    for (const slot of slots) {
+      const dist = Math.abs(clientY - slot.y);
+      if (dist < bestDist) {
+        best = slot;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+
+  /**
    * @param {MouseEvent} event
    */
   function onClick(event) {
+    if (suppressClick) {
+      suppressClick = false;
+      event.preventDefault();
+      return;
+    }
     const target = event.target;
     if (!target || !target.closest) return;
     const add = target.closest("[data-add]");
     if (add && !add.closest(".im-graph")) {
       event.preventDefault();
-      addFeature(add.dataset.add || "");
+      addFeature(add.dataset.add || "", add.dataset.shape);
+      closeMenu();
+      return;
+    }
+    if (target.closest("[data-menu-toggle]")) {
+      event.preventDefault();
+      const open = menu.hidden;
+      menu.hidden = !open;
+      addToggle.setAttribute("aria-expanded", open ? "true" : "false");
       return;
     }
     const actionEl = target.closest("[data-action]");
     if (actionEl && !actionEl.closest(".im-graph")) {
       const action = actionEl.dataset.action || "";
-      if (action === "select" || action === "move" || action === "remove-block" || action === "remove-control" || action === "remove-shape") {
+      if (action === "select" || action === "move" || action === "remove-block" || action === "remove-control" || action === "remove-shape" || action === "add-animation" || action === "remove-animation") {
         event.preventDefault();
         runAction(actionEl);
       }
@@ -475,37 +716,54 @@ export function mountDocumentEditor(container, source, options = {}) {
 
   /**
    * @param {string} feature
+   * @param {string} [shapeType]
+   * @param {{ at?: number, figureId?: string | null }} [placement]
    */
-  function addFeature(feature) {
-    if (feature === "animated") {
-      addAnimated();
+  function addFeature(feature, shapeType, placement) {
+    if (feature === "graph" || feature === "animated") {
+      const at = placement && !placement.figureId ? placement.at : undefined;
+      const result = insertFeature(doc, "graph", { at });
+      doc = result.doc;
+      selectedId = result.focusId || selectedId;
+      paint();
+      commit();
       return;
     }
-    const shapeType = feature === "shape" ? root.querySelector("[data-shape-kind]")?.value || "rect" : undefined;
-    const selected = doc.blocks.find((b) => b.id === selectedId);
-    const figureId = selected && selected.type === "figure" ? selected.id : undefined;
-    const result = insertFeature(doc, feature, { figureId, shapeType });
+    if (feature === "shape" && !shapeType) shapeType = "rect";
+    /** @type {string | undefined} */
+    let figureId;
+    /** @type {number | undefined} */
+    let at;
+    if (placement) {
+      figureId = placement.figureId || undefined;
+      at = figureId ? undefined : placement.at;
+    } else {
+      const selected = doc.blocks.find((b) => b.id === selectedId);
+      figureId = selected && selected.type === "figure" ? selected.id : undefined;
+    }
+    const result = insertFeature(doc, feature, { figureId, shapeType, at });
     doc = result.doc;
     selectedId = result.focusId || selectedId;
     paint();
     commit();
   }
 
-  async function addAnimated() {
-    try {
-      const res = await fetch("examples/agent-loop.md");
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const parsed = parseDocument(await res.text());
-      const figure = parsed.blocks.find((b) => b.type === "figure" && b.customSvg);
-      if (!figure) throw new Error("missing figure");
-      const result = insertFeature(doc, "animated", { customSvg: figure.customSvg, viewBox: figure.viewBox });
-      doc = result.doc;
-      selectedId = result.focusId;
-      paint();
-      commit();
-    } catch (_) {
-      options.onStatus?.("Could not load the animated figure");
-    }
+  /**
+   * @param {string} id
+   * @param {boolean} on
+   */
+  function setGraphAnimated(id, on) {
+    const block = doc.blocks.find((b) => b.id === id);
+    if (!block || block.type !== "graph") return;
+    const model = {
+      nodes: (block.model?.nodes || []).map((n) => ({ ...n })),
+      edges: (block.model?.edges || []).map((e) => ({ ...e })),
+    };
+    if (block.model?.motion) model.motion = { ...block.model.motion };
+    if (on) model.animated = true;
+    doc = { blocks: updateBlock(doc, id, { model }).blocks };
+    paint();
+    commit();
   }
 
   /**
@@ -532,6 +790,14 @@ export function mountDocumentEditor(container, source, options = {}) {
       if (selectedId === id) selectedId = null;
       paint();
       commit();
+      return;
+    }
+    if (action === "add-animation") {
+      setGraphAnimated(id, true);
+      return;
+    }
+    if (action === "remove-animation") {
+      setGraphAnimated(id, false);
       return;
     }
     const index = Number(actionEl.dataset.index);

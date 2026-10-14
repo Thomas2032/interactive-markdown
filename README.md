@@ -42,7 +42,7 @@ npx serve .
 
 ## Graph editor tab
 
-The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. Each change rewrites the source. The right pane is the rendered preview.
+The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path. Each change rewrites the source. The right pane is the rendered preview.
 
 ## IVM dialect (quick reference)
 
@@ -78,11 +78,12 @@ Fence name: **`ivm`**.
 | `@svg` | Everything after this line is SVG markup |
 | `@graph` | Start an editable directed graph. This is the first directive in that fence |
 | `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
-| `@edge from -> to` | Directed edge between two nodes |
+| `@edge from -> to` | Directed edge. Add `from=top\|right\|bottom\|left` and `to=top\|right\|bottom\|left` to choose the sides. Defaults are `from=right` and `to=left` |
+| `@animate` | Play marching dashes and traveling dots on the graph canvas. Options: `path=ortho\|straight\|curve`, `quantity=N` (1–12), `direction=forward\|reverse`, `speed=seconds` |
 
 ### Graph
 
-A fence that starts with `@graph` is a node-and-edge diagram. The preview is the editor: drag a node, drag its right port onto another node, double-click a label to rename, and press Delete to remove the selection. Each committed edit replaces that fence in the source. Do not mix `@svg` or controls into the same fence.
+A fence that starts with `@graph` is a node-and-edge diagram. The preview is the editor: drag a node, drag a port on any side onto another node, double-click a label to rename, and press Delete to remove the selection. `@animate` runs the motion on that same canvas. Path, quantity, direction, and speed are edited there and written back onto the `@animate` line. Each committed edit replaces that fence in the source. Do not mix `@svg` or controls into the same fence.
 
 ````markdown
 ```ivm
@@ -116,7 +117,7 @@ Everything after `@svg` can be a self-contained animated figure:
 
 Scripts, event handlers, and remote URLs are still removed. The figure is mounted in a shadow root so its CSS cannot restyle the editor. The SVG is rewritten only when the substituted markup changes, so those animations keep playing while sliders sit still.
 
-A block with only `@svg` (no controls) renders as a full-width figure. See [`examples/agent-loop.md`](examples/agent-loop.md).
+A block with only `@svg` (no controls) renders as a full-width figure.
 
 ### Fallback
 
@@ -128,7 +129,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 
 - [`examples/amplitude.md`](examples/amplitude.md) — wave amplitude + phase timer
 - [`examples/circular-motion.md`](examples/circular-motion.md) — point on a circle with spin animation
-- [`examples/agent-loop.md`](examples/agent-loop.md) — animated architecture figure (CSS + SMIL)
+- [`examples/agent-loop.md`](examples/agent-loop.md) — agent loop drawn as an animated graph
 - [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
 
 ## Project layout
