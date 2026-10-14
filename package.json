@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
   "version": "1.0.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG sliders and timers",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG and an editable graph",
   "main": "index.js",
   "directories": {
     "example": "examples",
@@ -9,12 +9,13 @@
   },
   "scripts": {
     "start": "serve .",
-    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs",
+    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs && node test/smoke-graph.mjs",
     "test:expr": "node test/smoke-expr.mjs",
     "test:parse": "node test/smoke-parse-ivm.mjs",
     "test:sanitize": "node test/smoke-sanitize-svg.mjs",
     "test:render": "node test/smoke-render.mjs",
-    "test:markdown": "node test/smoke-markdown.mjs"
+    "test:markdown": "node test/smoke-markdown.mjs",
+    "test:graph": "node test/smoke-graph.mjs"
   },
   "repository": {
     "type": "git",

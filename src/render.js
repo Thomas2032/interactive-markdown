@@ -5,6 +5,7 @@
 import { evaluate, substitute } from "./expr.js";
 import { parseIvm } from "./parse-ivm.js";
 import { sanitizeSvg } from "./sanitize-svg.js";
+import { mountGraphEditor, serializeGraph } from "./graph-editor.js";
 
 /** @type {Map<string, Record<string, unknown>>} */
 const namespaces = new Map();
@@ -28,9 +29,10 @@ export function resetNamespaces() {
  * Mount one ```ivm fence body into a container element.
  * @param {HTMLElement} container
  * @param {string} fenceBody
+ * @param {{ onGraphChange?: (body: string) => void }} [options]
  * @returns {{ destroy: () => void, getState: () => Record<string, unknown> }}
  */
-export function mountIvm(container, fenceBody) {
+export function mountIvm(container, fenceBody, options = {}) {
   const parsed = parseIvm(fenceBody);
   const doc = container.ownerDocument || globalThis.document;
   container.classList.add("im-ivm");
@@ -41,6 +43,26 @@ export function mountIvm(container, fenceBody) {
     err.className = "im-errors";
     err.textContent = parsed.errors.join("\n");
     container.appendChild(err);
+  }
+
+  if (parsed.graph) {
+    container.classList.add("im-ivm-graph");
+    const graphHost = doc.createElement("div");
+    container.appendChild(graphHost);
+    const mounted = mountGraphEditor(graphHost, parsed.graph, {
+      onChange(model) {
+        options.onGraphChange?.(serializeGraph(model));
+      },
+    });
+    return {
+      destroy() {
+        mounted.destroy();
+        container.innerHTML = "";
+      },
+      getState() {
+        return { graph: mounted.getModel() };
+      },
+    };
   }
 
   const nsState = getNamespaceState(parsed.namespace);
