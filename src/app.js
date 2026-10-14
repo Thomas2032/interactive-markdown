@@ -2,12 +2,14 @@
  * Interactive Markdown — editor + live preview shell.
  */
 
+import { mountDocumentEditor } from "./document-editor.js";
 import { renderDocument } from "./markdown.js";
 import { replaceIvmFence } from "./parse-ivm.js";
 
 const STORAGE_KEY = "interactive-markdown-draft-v1";
 
 const editor = document.getElementById("editor");
+const graphEditorEl = document.getElementById("graph-editor");
 const preview = document.getElementById("preview");
 const statusEl = document.getElementById("status");
 const btnOpen = document.getElementById("btn-open");
@@ -15,9 +17,13 @@ const btnSave = document.getElementById("btn-save");
 const btnClear = document.getElementById("btn-clear");
 const fileInput = document.getElementById("file-input");
 const exampleSelect = document.getElementById("example-select");
+const tabSource = document.getElementById("tab-source");
+const tabGraph = document.getElementById("tab-graph");
 
 /** @type {{ destroy: () => void } | null} */
-let currentMount = null;
+let previewMount = null;
+/** @type {{ destroy: () => void } | null} */
+let graphMount = null;
 let debounceTimer = 0;
 let dirty = false;
 
@@ -25,30 +31,85 @@ function setStatus(msg) {
   if (statusEl) statusEl.textContent = msg;
 }
 
+function persistDraft() {
+  dirty = true;
+  try {
+    localStorage.setItem(STORAGE_KEY, editor.value);
+  } catch (_) {
+    /* ignore quota */
+  }
+}
+
+function showPreviewError(err) {
+  preview.innerHTML = `<div class="im-errors">${escapeHtml(err.message || String(err))}</div>`;
+  setStatus("Render error");
+  console.error(err);
+}
+
+function renderPreview() {
+  if (previewMount) {
+    previewMount.destroy();
+    previewMount = null;
+  }
+  previewMount = renderDocument(preview, editor.value, {
+    onGraphChange(fenceIndex, body) {
+      editor.value = replaceIvmFence(editor.value, fenceIndex, body);
+      persistDraft();
+      setStatus("Graph updated");
+      refreshGraphEditor();
+    },
+  });
+}
+
+function refreshGraphEditor() {
+  if (!graphEditorEl) return;
+  if (graphMount) {
+    graphMount.destroy();
+    graphMount = null;
+  }
+  graphMount = mountDocumentEditor(graphEditorEl, editor.value, {
+    onChange(markdown) {
+      editor.value = markdown;
+      persistDraft();
+      setStatus("Document updated");
+      try {
+        renderPreview();
+      } catch (err) {
+        showPreviewError(err);
+      }
+    },
+    onStatus(msg) {
+      setStatus(msg);
+    },
+  });
+}
+
 function renderNow() {
-  if (currentMount) {
-    currentMount.destroy();
-    currentMount = null;
+  let previewOk = false;
+  try {
+    renderPreview();
+    previewOk = true;
+  } catch (err) {
+    showPreviewError(err);
   }
   try {
-    currentMount = renderDocument(preview, editor.value, {
-      onGraphChange(fenceIndex, body) {
-        editor.value = replaceIvmFence(editor.value, fenceIndex, body);
-        dirty = true;
-        try {
-          localStorage.setItem(STORAGE_KEY, editor.value);
-        } catch (_) {
-          /* ignore quota */
-        }
-        setStatus("Graph updated");
-      },
-    });
-    setStatus(dirty ? "Edited · preview updated" : "Preview updated");
+    refreshGraphEditor();
   } catch (err) {
-    preview.innerHTML = `<div class="im-errors">${escapeHtml(err.message || String(err))}</div>`;
+    if (graphEditorEl) {
+      graphEditorEl.innerHTML = `<div class="im-errors">${escapeHtml(err.message || String(err))}</div>`;
+    }
     setStatus("Render error");
     console.error(err);
   }
+  if (previewOk) setStatus(dirty ? "Edited · preview updated" : "Preview updated");
+}
+
+function showEditorTab(name) {
+  const source = name !== "graph";
+  if (editor) editor.hidden = !source;
+  if (graphEditorEl) graphEditorEl.hidden = source;
+  tabSource?.setAttribute("aria-selected", source ? "true" : "false");
+  tabGraph?.setAttribute("aria-selected", source ? "false" : "true");
 }
 
 function scheduleRender() {
@@ -102,7 +163,7 @@ async function loadExample(name) {
 
 const DEFAULT_DOC = `# Interactive Markdown
 
-Edit the left pane. The preview updates as you type.
+Edit the source, or open the Graph editor tab. The preview on the right updates as you go.
 
 Use an \`\`\`ivm\`\`\` fence for sliders, timers, and live SVG.
 
@@ -144,6 +205,9 @@ function init() {
 
   editor.value = start;
   editor.addEventListener("input", scheduleRender);
+  tabSource?.addEventListener("click", () => showEditorTab("source"));
+  tabGraph?.addEventListener("click", () => showEditorTab("graph"));
+  showEditorTab("source");
 
   btnOpen?.addEventListener("click", () => fileInput?.click());
   fileInput?.addEventListener("change", async () => {
