@@ -1,20 +1,28 @@
 /**
  * Basic directed-graph editor.
  * The model is plain data ({ nodes, edges }) so it can be stored in an ```ivm @graph fence.
- * Gestures: drag a node, drag the right port onto another node, double-click to add or rename.
+ * Gestures: drag a node, drag a side port onto another node, double-click to add or rename.
  */
 
 export const NODE_W = 168;
 export const NODE_H = 56;
 
 export const GRAPH_KINDS = Object.freeze(["action", "input", "output", "decision"]);
+export const GRAPH_SIDES = Object.freeze(["top", "right", "bottom", "left"]);
+export const GRAPH_PATHS = Object.freeze(["ortho", "straight", "curve"]);
 
 const KIND_SET = new Set(GRAPH_KINDS);
+const SIDE_SET = new Set(GRAPH_SIDES);
+const DEFAULT_SPEED = 2.8;
 
 /**
+ * @typedef {"left"|"right"|"top"|"bottom"} GraphSide
+ * @typedef {"ortho"|"straight"|"curve"} GraphPath
+ * @typedef {"forward"|"reverse"} GraphDirection
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
- * @typedef {{ from: string, to: string }} GraphEdge
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[] }} GraphModel
+ * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
+ * @typedef {{ path: GraphPath, quantity: number, direction: GraphDirection, speed: number }} GraphMotion
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
  * @typedef {{ type: 'node', id: string } | { type: 'edge', index: number }} GraphSelection
  */
 
@@ -22,6 +30,37 @@ const KIND_SET = new Set(GRAPH_KINDS);
 export function normalizeKind(kind) {
   const k = String(kind || "action").toLowerCase();
   return KIND_SET.has(k) ? k : "action";
+}
+
+/**
+ * @param {unknown} side
+ * @param {GraphSide} fallback
+ * @returns {GraphSide}
+ */
+export function normalizeSide(side, fallback) {
+  const s = String(side || fallback).toLowerCase();
+  return SIDE_SET.has(s) ? /** @type {GraphSide} */ (s) : fallback;
+}
+
+/**
+ * @param {Partial<GraphMotion> | null | undefined} motion
+ * @returns {GraphMotion}
+ */
+export function normalizeMotion(motion) {
+  const path = String(motion?.path || "ortho").toLowerCase();
+  const direction = String(motion?.direction || "forward").toLowerCase();
+  let quantity = Math.round(Number(motion?.quantity ?? 1));
+  if (!Number.isFinite(quantity)) quantity = 1;
+  quantity = Math.min(12, Math.max(1, quantity));
+  let speed = Number(motion?.speed ?? DEFAULT_SPEED);
+  if (!Number.isFinite(speed)) speed = DEFAULT_SPEED;
+  speed = Math.min(30, Math.max(0.2, Math.round(speed * 10) / 10));
+  return {
+    path: path === "straight" || path === "curve" ? /** @type {GraphPath} */ (path) : "ortho",
+    quantity,
+    direction: direction === "reverse" ? "reverse" : "forward",
+    speed,
+  };
 }
 
 function clamp(n, lo, hi) {
@@ -70,16 +109,35 @@ export function quoteGraphLabel(label) {
  */
 export function serializeGraph(model) {
   const lines = ["@graph"];
+  if (model.animated) lines.push(serializeAnimate(model.motion));
   for (const n of model.nodes) {
     const kind = n.kind && n.kind !== "action" ? ` kind=${n.kind}` : "";
     lines.push(
       `@node ${n.id}: ${quoteGraphLabel(n.label)} x=${Math.round(n.x)} y=${Math.round(n.y)}${kind}`
     );
   }
-  for (const e of model.edges) {
-    lines.push(`@edge ${e.from} -> ${e.to}`);
-  }
+  for (const e of model.edges) lines.push(serializeEdge(e));
   return lines.join("\n") + "\n";
+}
+
+/**
+ * @param {Partial<GraphMotion> | null | undefined} motion
+ */
+function serializeAnimate(motion) {
+  const next = normalizeMotion(motion);
+  return `@animate path=${next.path} quantity=${next.quantity} direction=${next.direction} speed=${next.speed}`;
+}
+
+/**
+ * @param {GraphEdge} edge
+ */
+function serializeEdge(edge) {
+  let line = `@edge ${edge.from} -> ${edge.to}`;
+  const fromSide = normalizeSide(edge.fromSide, "right");
+  const toSide = normalizeSide(edge.toSide, "left");
+  if (fromSide !== "right") line += ` from=${fromSide}`;
+  if (toSide !== "left") line += ` to=${toSide}`;
+  return line;
 }
 
 /**
@@ -96,7 +154,7 @@ export function addNode(model, partial = {}) {
     y: partial.y == null ? pos.y : snap(clamp(partial.y, 0, 4000)),
     kind: normalizeKind(partial.kind),
   };
-  return { nodes: model.nodes.concat(node), edges: model.edges.map((e) => ({ ...e })) };
+  return carry(model, { nodes: model.nodes.concat(node), edges: model.edges.map((e) => ({ ...e })) });
 }
 
 /**
@@ -107,12 +165,12 @@ export function addNode(model, partial = {}) {
  * @returns {GraphModel}
  */
 export function moveNode(model, id, x, y) {
-  return {
+  return carry(model, {
     nodes: model.nodes.map((n) =>
       n.id === id ? { ...n, x: snap(clamp(x, 0, 4000)), y: snap(clamp(y, 0, 4000)) } : { ...n }
     ),
     edges: model.edges.map((e) => ({ ...e })),
-  };
+  });
 }
 
 /**
@@ -123,10 +181,10 @@ export function moveNode(model, id, x, y) {
  */
 export function renameNode(model, id, label) {
   const next = String(label ?? "").trim();
-  return {
+  return carry(model, {
     nodes: model.nodes.map((n) => (n.id === id ? { ...n, label: next || n.label } : { ...n })),
     edges: model.edges.map((e) => ({ ...e })),
-  };
+  });
 }
 
 /**
@@ -137,19 +195,20 @@ export function renameNode(model, id, label) {
  */
 export function setNodeKind(model, id, kind) {
   const k = normalizeKind(kind);
-  return {
+  return carry(model, {
     nodes: model.nodes.map((n) => (n.id === id ? { ...n, kind: k } : { ...n })),
     edges: model.edges.map((e) => ({ ...e })),
-  };
+  });
 }
 
 /**
  * @param {GraphModel} model
  * @param {string} from
  * @param {string} to
+ * @param {{ fromSide?: GraphSide, toSide?: GraphSide }} [sides]
  * @returns {{ model: GraphModel, ok: boolean, reason?: string }}
  */
-export function addEdge(model, from, to) {
+export function addEdge(model, from, to, sides = {}) {
   if (!from || !to || from === to) return { model, ok: false, reason: "self" };
   if (!model.nodes.some((n) => n.id === from) || !model.nodes.some((n) => n.id === to)) {
     return { model, ok: false, reason: "missing" };
@@ -157,13 +216,35 @@ export function addEdge(model, from, to) {
   if (model.edges.some((e) => e.from === from && e.to === to)) {
     return { model, ok: false, reason: "duplicate" };
   }
+  /** @type {GraphEdge} */
+  const edge = { from, to };
+  const fromSide = normalizeSide(sides.fromSide, "right");
+  const toSide = normalizeSide(sides.toSide, "left");
+  if (fromSide !== "right") edge.fromSide = fromSide;
+  if (toSide !== "left") edge.toSide = toSide;
   return {
-    model: {
+    model: carry(model, {
       nodes: model.nodes.map((n) => ({ ...n })),
-      edges: model.edges.concat({ from, to }),
-    },
+      edges: model.edges.concat(edge),
+    }),
     ok: true,
   };
+}
+
+/**
+ * @param {GraphModel} model
+ * @param {Partial<GraphMotion>} patch
+ * @returns {GraphModel}
+ */
+export function setMotion(model, patch) {
+  const motion = normalizeMotion({ ...normalizeMotion(model.motion), ...patch });
+  const next = carry(model, {
+    nodes: model.nodes.map((n) => ({ ...n })),
+    edges: model.edges.map((e) => ({ ...e })),
+  });
+  next.animated = true;
+  next.motion = motion;
+  return next;
 }
 
 /**
@@ -174,15 +255,15 @@ export function addEdge(model, from, to) {
 export function removeSelection(model, selection) {
   if (!selection) return model;
   if (selection.type === "node") {
-    return {
+    return carry(model, {
       nodes: model.nodes.filter((n) => n.id !== selection.id),
       edges: model.edges.filter((e) => e.from !== selection.id && e.to !== selection.id),
-    };
+    });
   }
-  return {
+  return carry(model, {
     nodes: model.nodes.map((n) => ({ ...n })),
     edges: model.edges.filter((_, i) => i !== selection.index),
-  };
+  });
 }
 
 function cssEscape(value) {
@@ -191,10 +272,17 @@ function cssEscape(value) {
 }
 
 function cloneModel(model) {
-  return {
+  return carry(model, {
     nodes: model.nodes.map((n) => ({ ...n })),
     edges: model.edges.map((e) => ({ ...e })),
-  };
+  });
+}
+
+/** @param {GraphModel} model @param {GraphModel} next */
+function carry(model, next) {
+  if (model && model.animated) next.animated = true;
+  if (next.motion == null && model && model.motion) next.motion = { ...model.motion };
+  return next;
 }
 
 function approachX(to) {
@@ -229,6 +317,97 @@ function edgePath(from, to) {
   return `M ${x1} ${y1} H ${x1 + 18} V ${yOut} H ${x2} V ${y2}`;
 }
 
+/**
+ * @param {GraphNode} node
+ * @param {GraphSide} side
+ */
+function sideAnchor(node, side) {
+  if (side === "left") return { x: node.x, y: node.y + NODE_H / 2, dx: -1, dy: 0 };
+  if (side === "top") return { x: node.x + NODE_W / 2, y: node.y, dx: 0, dy: -1 };
+  if (side === "bottom") return { x: node.x + NODE_W / 2, y: node.y + NODE_H, dx: 0, dy: 1 };
+  return { x: node.x + NODE_W, y: node.y + NODE_H / 2, dx: 1, dy: 0 };
+}
+
+/**
+ * @param {GraphNode} node
+ * @param {{ x: number, y: number }} point
+ * @returns {GraphSide}
+ */
+function nearestSide(node, point) {
+  const nx = (point.x - (node.x + NODE_W / 2)) / (NODE_W / 2);
+  const ny = (point.y - (node.y + NODE_H / 2)) / (NODE_H / 2);
+  if (Math.abs(nx) >= Math.abs(ny)) return nx >= 0 ? "right" : "left";
+  return ny >= 0 ? "bottom" : "top";
+}
+
+/**
+ * @param {number} value
+ */
+function px(value) {
+  return String(Math.round(value));
+}
+
+/**
+ * @param {GraphNode} from
+ * @param {GraphNode} to
+ * @param {GraphEdge | undefined} edge
+ * @param {GraphPath} style
+ */
+function edgeRoute(from, to, edge, style) {
+  const fromSide = normalizeSide(edge?.fromSide, "right");
+  const toSide = normalizeSide(edge?.toSide, "left");
+  if (style === "ortho" && fromSide === "right" && toSide === "left") {
+    return { d: edgePath(from, to), tip: edgeTip(to) };
+  }
+  return sideRoute(from, to, fromSide, toSide, style);
+}
+
+/**
+ * @param {GraphNode} from
+ * @param {GraphNode} to
+ * @param {GraphSide} fromSide
+ * @param {GraphSide} toSide
+ * @param {GraphPath} style
+ */
+function sideRoute(from, to, fromSide, toSide, style) {
+  const a = sideAnchor(from, fromSide);
+  const b = sideAnchor(to, toSide);
+  const leave = { x: a.x + a.dx * 18, y: a.y + a.dy * 18 };
+  const approach = { x: b.x + b.dx * 18, y: b.y + b.dy * 18 };
+  const tipEnd = { x: b.x + b.dx * 6, y: b.y + b.dy * 6 };
+  const tip = `M ${px(approach.x)} ${px(approach.y)} L ${px(tipEnd.x)} ${px(tipEnd.y)}`;
+  if (style === "straight") {
+    return { d: `M ${px(a.x)} ${px(a.y)} L ${px(approach.x)} ${px(approach.y)}`, tip };
+  }
+  if (style === "curve") {
+    const c1 = { x: a.x + a.dx * 64, y: a.y + a.dy * 64 };
+    const c2 = { x: b.x + b.dx * 64, y: b.y + b.dy * 64 };
+    return {
+      d: `M ${px(a.x)} ${px(a.y)} C ${px(c1.x)} ${px(c1.y)} ${px(c2.x)} ${px(c2.y)} ${px(approach.x)} ${px(approach.y)}`,
+      tip,
+    };
+  }
+  /** @type {{ x: number, y: number }[]} */
+  const pts = [
+    { x: a.x, y: a.y },
+    leave,
+  ];
+  if (Math.abs(approach.x - leave.x) >= 1 && Math.abs(approach.y - leave.y) >= 1) {
+    if (Math.abs(a.dx) >= Math.abs(a.dy)) pts.push({ x: approach.x, y: leave.y });
+    else pts.push({ x: leave.x, y: approach.y });
+  }
+  pts.push(approach);
+  let d = "";
+  /** @type {{ x: number, y: number } | null} */
+  let prev = null;
+  for (const p of pts) {
+    if (prev && Math.abs(prev.x - p.x) < 0.5 && Math.abs(prev.y - p.y) < 0.5) continue;
+    d += d ? ` L ${px(p.x)} ${px(p.y)}` : `M ${px(p.x)} ${px(p.y)}`;
+    prev = p;
+  }
+  return { d, tip };
+}
+
 let mountSeq = 0;
 
 /**
@@ -251,7 +430,7 @@ export function mountGraphEditor(container, initial, options = {}) {
   let dragging = null;
   /** @type {{ id: string, at: number } | null} */
   let labelTap = null;
-  /** @type {{ fromId: string, pointerId: number } | null} */
+  /** @type {{ fromId: string, fromSide: GraphSide, pointerId: number } | null} */
   let connecting = null;
   let dead = false;
 
@@ -291,10 +470,27 @@ export function mountGraphEditor(container, initial, options = {}) {
 
   bar.append(addBtn, kindLabel, deleteBtn, countEl);
 
+  const motionBar = doc.createElement("div");
+  motionBar.className = "im-graph-motion-bar";
+  motionBar.hidden = true;
+
+  const pathCtl = motionSelect("Path", "path", [
+    ["ortho", "Orthogonal"],
+    ["straight", "Straight"],
+    ["curve", "Curve"],
+  ]);
+  const qtyCtl = motionNumber("Quantity", "quantity", 1, 12, 1);
+  const dirCtl = motionSelect("Direction", "direction", [
+    ["forward", "Forward"],
+    ["reverse", "Reverse"],
+  ]);
+  const speedCtl = motionNumber("Seconds", "speed", 0.2, 30, 0.1);
+  motionBar.append(pathCtl.wrap, qtyCtl.wrap, dirCtl.wrap, speedCtl.wrap);
+
   const help = doc.createElement("p");
   help.className = "im-graph-help";
   help.textContent =
-    "Drag a node to move it. Drag the right dot onto another node to connect. Double-click a label to rename, or the canvas to add a node. Delete removes the selection.";
+    "Drag a node to move it. Drag a dot on the top, right, bottom, or left onto another node. Double-click a label to rename, or the canvas to add a node. Delete removes the selection.";
 
   const canvas = doc.createElement("div");
   canvas.className = "im-graph-canvas";
@@ -338,7 +534,7 @@ export function mountGraphEditor(container, initial, options = {}) {
 
   stage.append(svg, empty);
   canvas.appendChild(stage);
-  root.append(bar, help, canvas);
+  root.append(bar, motionBar, help, canvas);
   container.appendChild(root);
 
   function commit() {
@@ -350,6 +546,78 @@ export function mountGraphEditor(container, initial, options = {}) {
     countEl.textContent = msg;
     clearTimeout(flashTimer);
     flashTimer = setTimeout(syncChrome, 1400);
+  }
+
+  /**
+   * @param {string} label
+   * @param {string} name
+   * @param {[string, string][]} choices
+   */
+  function motionSelect(label, name, choices) {
+    const wrap = doc.createElement("label");
+    wrap.className = "im-graph-kind-label";
+    wrap.appendChild(doc.createTextNode(label));
+    const select = doc.createElement("select");
+    select.dataset.motion = name;
+    select.setAttribute("aria-label", label);
+    for (const [value, text] of choices) {
+      const opt = doc.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      select.appendChild(opt);
+    }
+    wrap.appendChild(select);
+    return { wrap, select };
+  }
+
+  /**
+   * @param {string} label
+   * @param {string} name
+   * @param {number} min
+   * @param {number} max
+   * @param {number} step
+   */
+  function motionNumber(label, name, min, max, step) {
+    const wrap = doc.createElement("label");
+    wrap.className = "im-graph-kind-label";
+    wrap.appendChild(doc.createTextNode(label));
+    const input = doc.createElement("input");
+    input.type = "number";
+    input.dataset.motion = name;
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.setAttribute("aria-label", label);
+    wrap.appendChild(input);
+    return { wrap, input };
+  }
+
+  /**
+   * @param {HTMLSelectElement} select
+   * @param {string} value
+   */
+  function setSelect(select, value) {
+    for (const opt of select.querySelectorAll("option")) {
+      const match = (opt.getAttribute("value") || "") === value;
+      if (match) opt.setAttribute("selected", "");
+      else opt.removeAttribute("selected");
+      try {
+        opt.selected = match;
+      } catch (_) {
+        /* linkedom option.selected can be locked */
+      }
+    }
+  }
+
+  /**
+   * @param {HTMLSelectElement} select
+   */
+  function readSelect(select) {
+    const options = [...select.querySelectorAll("option")];
+    const live = options.find((opt) => opt.selected);
+    if (live) return live.getAttribute("value") || live.value || "";
+    const marked = options.find((opt) => opt.hasAttribute("selected"));
+    return marked ? marked.getAttribute("value") || marked.value || "" : "";
   }
 
   function setKindSelect(kind) {
@@ -365,6 +633,14 @@ export function mountGraphEditor(container, initial, options = {}) {
     setKindSelect(node ? node.kind : pendingKind);
     deleteBtn.disabled = !selection;
     countEl.textContent = `${model.nodes.length} node${model.nodes.length === 1 ? "" : "s"} · ${model.edges.length} edge${model.edges.length === 1 ? "" : "s"}`;
+    motionBar.hidden = !model.animated;
+    if (model.animated) {
+      const motion = normalizeMotion(model.motion);
+      setSelect(pathCtl.select, motion.path);
+      setSelect(dirCtl.select, motion.direction);
+      if (doc.activeElement !== qtyCtl.input) qtyCtl.input.value = String(motion.quantity);
+      if (doc.activeElement !== speedCtl.input) speedCtl.input.value = String(motion.speed);
+    }
   }
 
   function contentSize() {
@@ -379,26 +655,64 @@ export function mountGraphEditor(container, initial, options = {}) {
 
   function paintEdges() {
     while (edgeLayer.firstChild) edgeLayer.removeChild(edgeLayer.firstChild);
+    const motion = model.animated ? normalizeMotion(model.motion) : null;
     model.edges.forEach((e, index) => {
       const from = model.nodes.find((n) => n.id === e.from);
       const to = model.nodes.find((n) => n.id === e.to);
       if (!from || !to) return;
-      const d = edgePath(from, to);
-      const tip = edgeTip(to);
+      const route = edgeRoute(from, to, e, motion ? motion.path : "ortho");
       const selected = selection?.type === "edge" && selection.index === index;
       const hit = doc.createElementNS("http://www.w3.org/2000/svg", "path");
       hit.setAttribute("class", "im-graph-edge-hit");
-      hit.setAttribute("d", `${d} ${tip}`);
+      hit.setAttribute("d", `${route.d} ${route.tip}`);
       hit.dataset.edge = String(index);
       const vis = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-      vis.setAttribute("class", "im-graph-edge" + (selected ? " is-selected" : ""));
-      vis.setAttribute("d", d);
+      vis.setAttribute(
+        "class",
+        "im-graph-edge" +
+          (motion ? " is-animated" : "") +
+          (motion?.direction === "reverse" ? " is-reverse" : "") +
+          (selected ? " is-selected" : "")
+      );
+      vis.setAttribute("d", route.d);
+      if (motion) vis.style.animationDuration = Math.max(0.35, motion.speed / 2) + "s";
       const head = doc.createElementNS("http://www.w3.org/2000/svg", "path");
       head.setAttribute("class", "im-graph-edge" + (selected ? " is-selected" : ""));
-      head.setAttribute("d", tip);
+      head.setAttribute("d", route.tip);
       head.setAttribute("marker-end", `url(#${markerId})`);
       edgeLayer.append(hit, vis, head);
+      if (motion) {
+        for (const dot of travelingDots(route.d, motion)) edgeLayer.appendChild(dot);
+      }
     });
+  }
+
+  /**
+   * @param {string} path
+   * @param {GraphMotion} motion
+   */
+  function travelingDots(path, motion) {
+    /** @type {SVGCircleElement[]} */
+    const dots = [];
+    for (let i = 0; i < motion.quantity; i++) {
+      const dot = doc.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("class", "im-graph-motion");
+      dot.setAttribute("r", "4.5");
+      dot.setAttribute("fill", "#f472b6");
+      const anim = doc.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
+      anim.setAttribute("dur", motion.speed + "s");
+      anim.setAttribute("repeatCount", "indefinite");
+      anim.setAttribute("path", path);
+      if (motion.direction === "reverse") {
+        anim.setAttribute("keyPoints", "1;0");
+        anim.setAttribute("keyTimes", "0;1");
+        anim.setAttribute("calcMode", "linear");
+      }
+      if (i > 0) anim.setAttribute("begin", `${(-motion.speed * i) / motion.quantity}s`);
+      dot.appendChild(anim);
+      dots.push(dot);
+    }
+    return dots;
   }
 
   function renderNode(node) {
@@ -419,21 +733,20 @@ export function mountGraphEditor(container, initial, options = {}) {
       el.appendChild(diamond);
     }
 
-    const portIn = doc.createElement("span");
-    portIn.className = "im-graph-port im-graph-port-in";
-    portIn.setAttribute("aria-hidden", "true");
-
     const label = doc.createElement("div");
     label.className = "im-graph-label";
     label.textContent = node.label;
     label.title = "Double-click to rename";
+    el.appendChild(label);
 
-    const portOut = doc.createElement("button");
-    portOut.type = "button";
-    portOut.className = "im-graph-port im-graph-port-out";
-    portOut.setAttribute("aria-label", `Connect from ${node.label}`);
-
-    el.append(portIn, label, portOut);
+    for (const side of GRAPH_SIDES) {
+      const port = doc.createElement("button");
+      port.type = "button";
+      port.className = "im-graph-port im-graph-port-" + side;
+      port.dataset.side = side;
+      port.setAttribute("aria-label", `Connect from the ${side} of ${node.label}`);
+      el.appendChild(port);
+    }
     return el;
   }
 
@@ -441,6 +754,7 @@ export function mountGraphEditor(container, initial, options = {}) {
     const size = contentSize();
     stage.style.width = size.w + "px";
     stage.style.height = size.h + "px";
+    stage.classList.toggle("is-animated", !!model.animated);
     empty.hidden = model.nodes.length > 0;
     for (const el of stage.querySelectorAll(".im-graph-node")) el.remove();
     for (const n of model.nodes) stage.appendChild(renderNode(n));
@@ -498,6 +812,20 @@ export function mountGraphEditor(container, initial, options = {}) {
   deleteBtn.addEventListener("click", () => {
     if (!selection) return;
     apply(removeSelection(model, selection), { selection: null });
+  });
+
+  pathCtl.select.addEventListener("change", () => {
+    apply(setMotion(model, { path: /** @type {GraphPath} */ (readSelect(pathCtl.select) || "ortho") }));
+  });
+  dirCtl.select.addEventListener("change", () => {
+    const direction = readSelect(dirCtl.select) === "reverse" ? "reverse" : "forward";
+    apply(setMotion(model, { direction }));
+  });
+  qtyCtl.input.addEventListener("change", () => {
+    apply(setMotion(model, { quantity: Number(qtyCtl.input.value) }));
+  });
+  speedCtl.input.addEventListener("change", () => {
+    apply(setMotion(model, { speed: Number(speedCtl.input.value) }));
   });
 
   kindSelect.addEventListener("change", () => {
@@ -595,13 +923,17 @@ export function mountGraphEditor(container, initial, options = {}) {
     const target = /** @type {Element} */ (e.target);
     if (target.closest?.(".im-graph-rename")) return;
 
-    const port = target.closest?.(".im-graph-port-out");
+    const port = target.closest?.(".im-graph-port");
     if (port) {
       e.preventDefault();
       e.stopPropagation();
       const id = port.closest(".im-graph-node")?.dataset.id;
       if (!id) return;
-      connecting = { fromId: id, pointerId: e.pointerId };
+      connecting = {
+        fromId: id,
+        fromSide: normalizeSide(port.dataset.side, "right"),
+        pointerId: e.pointerId,
+      };
       selection = { type: "node", id };
       paint();
       try {
@@ -677,9 +1009,8 @@ export function mountGraphEditor(container, initial, options = {}) {
       const from = model.nodes.find((n) => n.id === connecting.fromId);
       if (!from) return;
       const p = pointInStage(e);
-      const x1 = from.x + NODE_W;
-      const y1 = from.y + NODE_H / 2;
-      tempPath.setAttribute("d", `M ${x1} ${y1} L ${p.x} ${p.y}`);
+      const anchor = sideAnchor(from, connecting.fromSide || "right");
+      tempPath.setAttribute("d", `M ${anchor.x} ${anchor.y} L ${p.x} ${p.y}`);
     }
   });
 
@@ -697,6 +1028,7 @@ export function mountGraphEditor(container, initial, options = {}) {
     }
     if (connecting && e.pointerId === connecting.pointerId) {
       const fromId = connecting.fromId;
+      const fromSide = connecting.fromSide;
       connecting = null;
       tempPath.setAttribute("d", "");
       const hit = doc.elementFromPoint?.(e.clientX, e.clientY);
@@ -705,7 +1037,14 @@ export function mountGraphEditor(container, initial, options = {}) {
         paint();
         return;
       }
-      const result = addEdge(model, fromId, toId);
+      const toNode = model.nodes.find((n) => n.id === toId);
+      const portSide = hit?.closest?.(".im-graph-port")?.dataset.side;
+      const toSide = portSide
+        ? normalizeSide(portSide, "left")
+        : toNode
+          ? nearestSide(toNode, pointInStage(e))
+          : "left";
+      const result = addEdge(model, fromId, toId, { fromSide, toSide });
       if (!result.ok) {
         paint();
         if (result.reason === "duplicate") flash("Those nodes are already connected");

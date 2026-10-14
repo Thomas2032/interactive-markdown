@@ -79,6 +79,13 @@ assert("serialize roundtrip", again.errors.length === 0, JSON.stringify(again.er
 assert("roundtrip label", again.graph.nodes[0].label === 'say "hi"');
 assert("action omitted", !serializeGraph(round).includes("kind=action"));
 assert("output kept", serializeGraph(round).includes("kind=output"));
+assert("still graph omits @animate", !serializeGraph(round).includes("@animate"));
+const animated = { ...round, animated: true };
+assert("animated writes @animate", serializeGraph(animated).includes("@animate"));
+const animatedAgain = parseIvm(serializeGraph(animated));
+assert("animated flag parses", animatedAgain.graph.animated === true);
+const kept = moveNode(animated, "a", 20, 20);
+assert("move keeps animated", kept.animated === true && serializeGraph(kept).includes("@animate"));
 
 const moved = moveNode(
   { nodes: [{ id: "a", label: "A", x: 0, y: 0, kind: "action" }], edges: [] },
@@ -107,6 +114,17 @@ assert("duplicate edge rejected", !dupEdge.ok && dupEdge.reason === "duplicate")
 assert("duplicate leaves model", dupEdge.model.edges.length === 1);
 const reverse = addEdge(first.model, "think", "trigger");
 assert("reverse edge ok", reverse.ok && reverse.model.edges.length === 2);
+const vertical = addEdge(base, "trigger", "think", { fromSide: "bottom", toSide: "top" });
+assert("bottom to top edge", vertical.ok && vertical.model.edges[0].fromSide === "bottom" && vertical.model.edges[0].toSide === "top");
+assert(
+  "serialize vertical edge",
+  serializeGraph(vertical.model).includes("@edge trigger -> think from=bottom to=top")
+);
+const verticalAgain = parseIvm(serializeGraph(vertical.model));
+assert(
+  "parse vertical edge",
+  verticalAgain.graph.edges[0].fromSide === "bottom" && verticalAgain.graph.edges[0].toSide === "top"
+);
 const self = addEdge(base, "trigger", "trigger");
 assert("self edge rejected", !self.ok && self.reason === "self");
 
@@ -147,6 +165,48 @@ assert("add writes n1", added.includes('@node n1: "Node" x=32 y=32'), added);
 assert("add paints node", emptyHost.querySelectorAll(".im-graph-node").length === 1);
 emptyMount.destroy();
 assert("destroy clears", emptyHost.innerHTML === "");
+
+const motionHost = document.createElement("div");
+document.body.appendChild(motionHost);
+const motion = mountGraphEditor(
+  motionHost,
+  {
+    nodes: [
+      { id: "a", label: "A", x: 8, y: 8, kind: "action" },
+      { id: "b", label: "B", x: 200, y: 8, kind: "action" },
+    ],
+    edges: [{ from: "a", to: "b" }],
+    animated: true,
+  }
+);
+assert("marching edge", !!motionHost.querySelector(".im-graph-edge.is-animated"));
+assert("traveling dot", !!motionHost.querySelector("animateMotion"));
+assert("node pulse stage", motionHost.querySelector(".im-graph-stage")?.classList.contains("is-animated"));
+assert("edge svg has no scene viewBox", !motionHost.querySelector(".im-graph-edges")?.getAttribute("viewBox"));
+assert("arrow glyph viewBox stays", motionHost.querySelector("marker")?.getAttribute("viewBox") === "0 0 10 10");
+assert("four ports", motionHost.querySelector(".im-graph-node")?.querySelectorAll(".im-graph-port").length === 4);
+assert("top port", !!motionHost.querySelector(".im-graph-port-top"));
+assert("bottom port", !!motionHost.querySelector(".im-graph-port-bottom"));
+const qty = motionHost.querySelector('[data-motion="quantity"]');
+qty.value = "3";
+qty.dispatchEvent(new window.Event("change", { bubbles: true }));
+assert("quantity paints three dots", motionHost.querySelectorAll("animateMotion").length === 3);
+const pathSel = motionHost.querySelector('[data-motion="path"]');
+for (const opt of pathSel.querySelectorAll("option")) {
+  if (opt.getAttribute("value") === "curve") opt.setAttribute("selected", "");
+  else opt.removeAttribute("selected");
+}
+pathSel.dispatchEvent(new window.Event("change", { bubbles: true }));
+assert("curve path", /C /.test(motionHost.querySelector(".im-graph-edge.is-animated")?.getAttribute("d") || ""));
+const dirSel = motionHost.querySelector('[data-motion="direction"]');
+for (const opt of dirSel.querySelectorAll("option")) {
+  if (opt.getAttribute("value") === "reverse") opt.setAttribute("selected", "");
+  else opt.removeAttribute("selected");
+}
+dirSel.dispatchEvent(new window.Event("change", { bubbles: true }));
+assert("reverse direction", motionHost.querySelector("animateMotion")?.getAttribute("keyPoints") === "1;0");
+assert("motion writes back", motion.getModel().motion.quantity === 3 && motion.getModel().motion.path === "curve");
+motion.destroy();
 mounted.destroy();
 
 const preview = document.getElementById("preview");

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseHTML, DOMParser } from "linkedom";
 import { marked } from "marked";
-import { insertFeature, parseDocument, serializeDocument } from "../src/document.js";
+import { insertFeature, parseDocument, serializeDocument, updateBlock } from "../src/document.js";
 import { mountDocumentEditor } from "../src/document-editor.js";
 
 const { window, document } = parseHTML(
@@ -70,15 +70,30 @@ const graphOut = serializeDocument(graph.blocks);
 assert("graph fence", /@graph/.test(graphOut) && /@node trigger:/.test(graphOut) && /@edge act -> output/.test(graphOut));
 
 const agent = parseDocument(read("agent-loop.md"));
-const animated = agent.blocks.find((b) => b.type === "figure" && b.customSvg);
-assert("opaque figure", !!animated && animated.shapes == null);
-assert("keeps keyframes", /@keyframes/.test(animated?.customSvg || ""));
-assert("keeps animateMotion", /animateMotion/.test(animated?.customSvg || ""));
-assert("keeps filter", /feGaussianBlur/.test(animated?.customSvg || ""));
+const agentGraph = agent.blocks.find((b) => b.type === "graph");
+assert("agent loop is a graph", !!agentGraph && agent.blocks.every((b) => b.type !== "figure"));
+assert("agent loop animates", agentGraph?.model.animated === true && agentGraph.model.motion?.quantity === 3);
+assert(
+  "agent loop uses top and bottom",
+  agentGraph?.model.edges.some((e) => e.fromSide === "bottom" && e.toSide === "top")
+);
 const agentOut = serializeDocument(agent.blocks);
-assert("keyframes survive", /@keyframes/.test(agentOut));
-assert("animateMotion survives", /animateMotion/.test(agentOut));
-assert("filter survives", /feGaussianBlur/.test(agentOut));
+assert("agent loop writes @animate", /@animate path=ortho quantity=3 direction=forward speed=2\.2/.test(agentOut));
+assert("agent loop writes a vertical edge", /@edge trigger -> think from=bottom to=top/.test(agentOut));
+assert("agent loop stays one fence", agentOut.split("```").length === 3);
+
+const customSvg = parseDocument(
+  "```ivm\n@svg\n<svg><style>@keyframes pulse{}</style><animateMotion path=\"M0 0\"/><feGaussianBlur stdDeviation=\"1\"/></svg>\n```\n"
+);
+const opaque = customSvg.blocks.find((b) => b.type === "figure" && b.customSvg);
+assert("opaque figure", !!opaque && opaque.shapes == null);
+assert("keeps keyframes", /@keyframes/.test(opaque?.customSvg || ""));
+assert("keeps animateMotion", /animateMotion/.test(opaque?.customSvg || ""));
+assert("keeps filter", /feGaussianBlur/.test(opaque?.customSvg || ""));
+const opaqueOut = serializeDocument(customSvg.blocks);
+assert("keyframes survive", /@keyframes/.test(opaqueOut));
+assert("animateMotion survives", /animateMotion/.test(opaqueOut));
+assert("filter survives", /feGaussianBlur/.test(opaqueOut));
 
 let built = insertFeature({ blocks: [] }, "slider");
 built = insertFeature(built.doc, "timer", { figureId: built.focusId });
@@ -128,6 +143,7 @@ mountDocumentEditor(graphHost, read("graph.md"), {
 const addNode = graphHost.querySelector('.im-graph-bar [data-action="add"]');
 addNode.dispatchEvent(new window.Event("click", { bubbles: true }));
 assert("graph add writes a node", typeof graphSeen === "string" && /@node n1:/.test(graphSeen), graphSeen);
+assert("graph.md stays still", graphSeen && !/@animate/.test(graphSeen));
 assert("graph add leaves the canvas mounted", !!graphHost.querySelector(".im-graph-canvas"));
 
 const proseHost = document.createElement("div");
@@ -139,6 +155,51 @@ assert("heading renders as html", prose[0]?.querySelector("h1")?.textContent ===
 assert("later prose renders as html", prose[1]?.querySelector("h2")?.textContent === "Tips");
 assert("prose is not wrapped in a block", ![...prose].some((el) => el.closest(".im-doc-block")));
 assert("one interactive block", proseHost.querySelectorAll(".im-doc-block").length === 1);
+
+const dragHost = document.createElement("div");
+document.body.appendChild(dragHost);
+let dragSeen = "";
+mountDocumentEditor(dragHost, "# Wave amplitude\n\nHello\n", {
+  onChange(markdown) {
+    dragSeen = markdown;
+  },
+});
+const headingBtn = dragHost.querySelector("[data-add=heading]");
+const point = (type, x, y) => {
+  const event = new window.Event(type, { bubbles: true });
+  event.clientX = x;
+  event.clientY = y;
+  event.button = 0;
+  event.pointerId = 1;
+  return event;
+};
+headingBtn.dispatchEvent(point("pointerdown", 10, 10));
+document.dispatchEvent(point("pointermove", 12, 48));
+document.dispatchEvent(point("pointerup", 12, 48));
+headingBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("drag snap inserts one heading", dragSeen.startsWith("## Heading\n"), dragSeen);
+assert("drag does not also click-add", dragSeen.split("## Heading").length === 2, dragSeen);
+
+let merged = insertFeature({ blocks: [] }, "graph");
+merged = {
+  doc: {
+    blocks: updateBlock(merged.doc, merged.focusId, {
+      model: {
+        nodes: [{ id: "a", label: "A", x: 8, y: 8, kind: "action" }],
+        edges: [],
+        animated: true,
+      },
+    }).blocks,
+  },
+};
+const mergedOut = serializeDocument(merged.doc.blocks);
+assert("animated graph is one fence", /@graph/.test(mergedOut) && /@animate/.test(mergedOut) && /@node a:/.test(mergedOut));
+assert("animated graph has no second svg fence", !/@svg/.test(mergedOut) && mergedOut.split("```").length === 3);
+const mergedAgain = parseDocument(mergedOut);
+assert("animated round trip is one graph", mergedAgain.blocks.filter((b) => b.type === "graph").length === 1);
+assert("animated round trip stays a graph", mergedAgain.blocks.every((b) => b.type !== "figure"));
+assert("animated flag stays", mergedAgain.blocks[0].model.animated === true);
+assert("animated nodes stay", mergedAgain.blocks[0].model.nodes.length === 1 && mergedAgain.blocks[0].model.nodes[0].id === "a");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

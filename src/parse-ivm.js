@@ -13,8 +13,9 @@
  *   @svg
  *   <svg>...</svg>   (remainder of fence; use {{expr}} in attrs/text)
  *   @graph
+ *   @animate [path=ortho|straight|curve] [quantity=N] [direction=forward|reverse] [speed=seconds]
  *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
- *   @edge from -> to
+ *   @edge from -> to [from=right|left|top|bottom] [to=left|right|top|bottom]
  */
 
 /**
@@ -30,9 +31,11 @@
  *   label?: string,
  *   expression?: string,
  * }} Control
+ * @typedef {"left"|"right"|"top"|"bottom"} GraphSide
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
- * @typedef {{ from: string, to: string }} GraphEdge
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[] }} GraphModel
+ * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
+ * @typedef {{ path: string, quantity: number, direction: string, speed: number }} GraphMotion
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
  * @typedef {{
  *   namespace: string|null,
  *   controls: Control[],
@@ -43,6 +46,45 @@
  */
 
 const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
+
+/**
+ * @param {string} line
+ * @param {string[]} errors
+ * @returns {GraphMotion}
+ */
+function readAnimate(line, errors) {
+  /** @type {GraphMotion} */
+  const motion = { path: "ortho", quantity: 1, direction: "forward", speed: 2.8 };
+  const rest = line.replace(/^@animate\b/i, "").trim();
+  if (!rest) return motion;
+  for (const part of rest.split(/\s+/)) {
+    const flag = part.match(/^(path|quantity|direction|speed)=(\S+)$/i);
+    if (!flag) {
+      errors.push(`@animate: unknown ${part}`);
+      continue;
+    }
+    const key = flag[1].toLowerCase();
+    const raw = flag[2];
+    const value = raw.toLowerCase();
+    if (key === "path") {
+      if (value !== "ortho" && value !== "straight" && value !== "curve") {
+        errors.push(`@animate: unknown path ${raw}`);
+      } else motion.path = value;
+    } else if (key === "quantity") {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 1 || n > 12) errors.push("@animate: quantity must be 1..12");
+      else motion.quantity = n;
+    } else if (key === "direction") {
+      if (value !== "forward" && value !== "reverse") errors.push(`@animate: unknown direction ${raw}`);
+      else motion.direction = value;
+    } else if (key === "speed") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0.2 || n > 30) errors.push("@animate: speed must be seconds from 0.2 to 30");
+      else motion.speed = Math.round(n * 10) / 10;
+    }
+  }
+  return motion;
+}
 
 /**
  * Read a leading "quoted" or 'quoted' string. Supports backslash escapes.
@@ -181,10 +223,10 @@ export function parseIvm(body) {
       }
     }
 
-    // @edge from -> to
+    // @edge from -> to [from=side] [to=side]
     {
       const m = line.match(
-        /^@edge\s+([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/i
+        /^@edge\s+([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+([^\s].*))?$/i
       );
       if (m) {
         const from = m[1];
@@ -209,10 +251,40 @@ export function parseIvm(body) {
           i++;
           continue;
         }
-        graph.edges.push({ from, to });
+        /** @type {GraphEdge} */
+        const edge = { from, to };
+        const tail = (m[3] || "").trim();
+        let sideError = false;
+        if (tail) {
+          for (const part of tail.split(/\s+/)) {
+            const flag = part.match(/^(from|to)=(left|right|top|bottom)$/i);
+            if (!flag) {
+              errors.push(`@edge ${from} -> ${to}: unknown ${part}`);
+              sideError = true;
+              continue;
+            }
+            const side = /** @type {GraphSide} */ (flag[2].toLowerCase());
+            if (flag[1].toLowerCase() === "from") edge.fromSide = side;
+            else edge.toSide = side;
+          }
+        }
+        if (edge.fromSide === "right") delete edge.fromSide;
+        if (edge.toSide === "left") delete edge.toSide;
+        if (!sideError) graph.edges.push(edge);
         i++;
         continue;
       }
+    }
+
+    if (/^@animate\b/i.test(line)) {
+      if (!graph) errors.push("@animate is only valid after @graph");
+      else if (graph.animated) errors.push("Duplicate @animate");
+      else {
+        graph.animated = true;
+        graph.motion = readAnimate(line, errors);
+      }
+      i++;
+      continue;
     }
 
     if (graph) {

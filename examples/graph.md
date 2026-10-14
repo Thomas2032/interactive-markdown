@@ -1,6 +1,6 @@
 # A small graph
 
-This fence is a directed graph. Drag a node to move it, and drag the dot on its right onto another node to connect them. The source on the left updates when you let go.
+This fence is a directed graph. Drag a node to move it, and drag a dot on its top, right, bottom, or left onto another node to connect them. The source on the left updates when you let go.
 
 ```ivm
 @graph

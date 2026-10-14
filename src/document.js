@@ -94,7 +94,7 @@ export function serializeFigure(block) {
 /**
  * @param {{ blocks?: object[] }} doc
  * @param {string} feature
- * @param {{ at?: number, figureId?: string, shapeType?: string, customSvg?: string, viewBox?: string }} [options]
+ * @param {{ at?: number, figureId?: string, shapeType?: string }} [options]
  * @returns {{ doc: { blocks: object[] }, focusId: string }}
  */
 export function insertFeature(doc, feature, options = {}) {
@@ -116,17 +116,11 @@ export function insertFeature(doc, feature, options = {}) {
     place({ id: nid(), type: "paragraph", text: "" });
   } else if (feature === "bullets") {
     place({ id: nid(), type: "bullets", items: ["Item"] });
-  } else if (feature === "graph") {
-    place({ id: nid(), type: "graph", model: { nodes: [], edges: [] } });
-  } else if (feature === "animated") {
+  } else if (feature === "graph" || feature === "animated") {
     place({
       id: nid(),
-      type: "figure",
-      namespace: null,
-      controls: [],
-      viewBox: options.viewBox || "0 0 1000 720",
-      shapes: null,
-      customSvg: options.customSvg || "",
+      type: "graph",
+      model: { nodes: [], edges: [], animated: true },
     });
   } else if (feature === "shape") {
     const shape = defaultShape(options.shapeType || "rect");
@@ -410,10 +404,7 @@ function blockFromIvm(body) {
     return {
       id: nid(),
       type: "graph",
-      model: {
-        nodes: parsed.graph.nodes.map((n) => ({ ...n })),
-        edges: parsed.graph.edges.map((e) => ({ ...e })),
-      },
+      model: copyGraphModel(parsed.graph),
     };
   }
   const template = parsed.templateSvg;
@@ -496,7 +487,10 @@ function serializeBlock(block) {
     return (block.items || []).map((item) => `- ${item}`).join("\n");
   }
   if (block.type === "markdown") return String(block.text ?? "");
-  if (block.type === "graph" || block.type === "figure") {
+  if (block.type === "graph") {
+    return "```ivm\n" + serializeFigure(block).replace(/\s*$/, "\n") + "```";
+  }
+  if (block.type === "figure") {
     return "```ivm\n" + serializeFigure(block).replace(/\s*$/, "\n") + "```";
   }
   return "";
@@ -555,6 +549,19 @@ function serializeControl(control) {
   return "";
 }
 
+/**
+ * @param {{ nodes?: object[], edges?: object[], animated?: boolean, motion?: object } | null | undefined} model
+ */
+function copyGraphModel(model) {
+  const next = {
+    nodes: (model?.nodes || []).map((n) => ({ ...n })),
+    edges: (model?.edges || []).map((e) => ({ ...e })),
+  };
+  if (model?.animated) next.animated = true;
+  if (model?.motion) next.motion = { ...model.motion };
+  return next;
+}
+
 function fmtNum(n) {
   const value = Number(n);
   return Number.isFinite(value) ? String(value) : "0";
@@ -585,14 +592,7 @@ function cloneBlock(block) {
   if (!block) return block;
   if (block.type === "bullets") return { ...block, items: (block.items || []).slice() };
   if (block.type === "graph") {
-    const model = block.model || { nodes: [], edges: [] };
-    return {
-      ...block,
-      model: {
-        nodes: (model.nodes || []).map((n) => ({ ...n })),
-        edges: (model.edges || []).map((e) => ({ ...e })),
-      },
-    };
+    return { ...block, model: copyGraphModel(block.model) };
   }
   if (block.type === "figure") {
     return {
