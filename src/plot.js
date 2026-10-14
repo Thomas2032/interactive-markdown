@@ -49,8 +49,8 @@ export function normalizePlot(plot) {
   const x = plot?.x || { min: -10, max: 10, step: 2, label: "x" };
   const y = plot?.y || { min: 0, max: 1, step: 0.2, label: "y" };
   return {
-    width: finiteOr(plot?.width, DEFAULT_WIDTH),
-    height: finiteOr(plot?.height, DEFAULT_HEIGHT),
+    width: positiveOr(plot?.width, DEFAULT_WIDTH),
+    height: positiveOr(plot?.height, DEFAULT_HEIGHT),
     grid: plot?.grid !== false,
     samples: Math.max(32, Math.min(2000, Math.round(finiteOr(plot?.samples, DEFAULT_SAMPLES)))),
     x: normalizeAxis(x, "x"),
@@ -311,6 +311,22 @@ function finiteOr(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Positive finite size, else fallback. Rejects null/undefined/0/NaN (Number(null)===0). */
+function positiveOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * @param {number} width
+ * @param {number} height
+ */
+function plotSizeSuffix(width, height) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "";
+  if (width === DEFAULT_WIDTH && height === DEFAULT_HEIGHT) return "";
+  return ` ${fmt(width)}x${fmt(height)}`;
+}
+
 function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -338,10 +354,9 @@ export function serializePlotLines(plot) {
   const model = normalizePlot(plot);
   /** @type {string[]} */
   const lines = [];
-  const size =
-    model.width !== DEFAULT_WIDTH || model.height !== DEFAULT_HEIGHT
-      ? ` ${fmt(model.width)}x${fmt(model.height)}`
-      : "";
+  // Only emit WxH when both are positive finite and differ from defaults.
+  // Missing / 0 / NaN sizes normalize to defaults and stay as bare @plot (never 0x0).
+  const size = plotSizeSuffix(model.width, model.height);
   const gridFlag = model.grid === false ? " nogrid" : "";
   lines.push(`@plot${size}${gridFlag}`);
   lines.push(serializeAxis("x", model.x));

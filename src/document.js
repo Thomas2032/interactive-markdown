@@ -365,8 +365,8 @@ function emptyPlot() {
     type: "plot",
     namespace: null,
     controls: [
-      { kind: "slider", name: "mu", range: [-5, 5], step: 0.1, default: 0, label: "mu" },
-      { kind: "slider", name: "sigma", range: [0.5, 4], step: 0.1, default: 1.5, label: "sigma" },
+      { kind: "slider", name: "mu", range: [-5, 5], step: 0.1, default: 0, label: "μ (mean)" },
+      { kind: "slider", name: "sigma", range: [0.5, 4], step: 0.1, default: 1.5, label: "σ (std dev)" },
     ],
     plot: {
       width: 480,
