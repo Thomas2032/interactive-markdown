@@ -13,6 +13,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` / `@calc`
 - SVG templates with `{{expr}}` bindings
+- Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
 - SVG sanitizer (strips scripts, event handlers, external hrefs)
 
@@ -82,6 +83,19 @@ Constants: `pi`, `e`, `tau`.
 
 Angles for trig functions are in **radians** (use `deg` / `rad` helpers as needed).
 
+### Animated SVG
+
+Everything after `@svg` can be a self-contained animated figure:
+
+- `<style>` with `@keyframes` (crossfades, pulses, marching dashes)
+- SMIL (`<animate>`, `<animateTransform>`, `<animateMotion>`)
+- Filters (`feGaussianBlur`, …) and paint servers such as `url(#id)`
+- `<use href="#symbol-id">` for icons defined in the same SVG
+
+Scripts, event handlers, and remote URLs are still removed. The figure is mounted in a shadow root so its CSS cannot restyle the editor. The SVG is rewritten only when the substituted markup changes, so those animations keep playing while sliders sit still.
+
+A block with only `@svg` (no controls) renders as a full-width figure. See [`examples/agent-loop.md`](examples/agent-loop.md).
+
 ### Fallback
 
 In a normal Markdown viewer, an `ivm` fence shows up as a plain code block — still readable, just not interactive.
@@ -92,6 +106,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 
 - [`examples/amplitude.md`](examples/amplitude.md) — wave amplitude + phase timer
 - [`examples/circular-motion.md`](examples/circular-motion.md) — point on a circle with spin animation
+- [`examples/agent-loop.md`](examples/agent-loop.md) — animated architecture figure (CSS + SMIL)
 
 ## Project layout
 

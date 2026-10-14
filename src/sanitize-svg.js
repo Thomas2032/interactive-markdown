@@ -1,7 +1,8 @@
 /**
  * Sanitize SVG markup before injecting into the DOM.
  * Strips script, foreignObject, event handlers, and external hrefs.
- * Safe shapes (rect, circle, line, path, text, g, defs, animate, …) are kept.
+ * Keeps shapes, SMIL animation, filters, internal <use>, and CSS in <style>
+ * (keyframes, dash motion) after a CSS pass that drops imports and remote urls.
  */
 
 /** Tags removed entirely (case-insensitive localName). */
@@ -14,10 +15,10 @@ const FORBIDDEN_TAGS = new Set([
   "link",
   "meta",
   "base",
-  "use", // may reference external resources
   "handler", // legacy
-  "style", // avoid CSS injection vectors in v1; presentation attrs remain
 ]);
+
+const MOTION_TAGS = new Set(["animate", "set", "animatetransform", "animatemotion"]);
 
 /**
  * Optional allowlist. If an element is not forbidden and not in this set,
@@ -44,6 +45,7 @@ export const SAFE_SVG_TAGS = Object.freeze([
   "animate",
   "animatetransform",
   "animatemotion",
+  "mpath",
   "set",
   "lineargradient",
   "radialgradient",
@@ -52,9 +54,36 @@ export const SAFE_SVG_TAGS = Object.freeze([
   "mask",
   "pattern",
   "marker",
+  "filter",
+  "fegaussianblur",
+  "femerge",
+  "femergenode",
+  "feoffset",
+  "feflood",
+  "fecomposite",
+  "feblend",
+  "fecolormatrix",
+  "fedropshadow",
+  "fecomponenttransfer",
+  "fefuncr",
+  "fefuncg",
+  "fefuncb",
+  "fefunca",
+  "femorphology",
+  "feturbulence",
+  "fedisplacementmap",
+  "feimage",
+  "fetile",
+  "fediffuselighting",
+  "fespecularlighting",
+  "fedistantlight",
+  "fepointlight",
+  "fespotlight",
   "image", // only with safe href (data:image or #)
   "switch",
   "a", // href must be safe (# only in practice)
+  "style", // sanitized CSS only; renderer scopes it to the figure
+  "use", // fragment hrefs only
 ]);
 
 /**
@@ -65,9 +94,148 @@ export function isSafeHref(href) {
   if (href == null || href === "") return true;
   const v = String(href).trim().toLowerCase();
   if (v.startsWith("#")) return true;
-  if (v.startsWith("data:image/")) return true;
-  // Block javascript:, http(s):, file:, and any other scheme or relative URL
+  if (v.startsWith("data:image/") && !v.startsWith("data:image/svg")) return true;
+  // Block javascript:, http(s):, file:, svg data urls, and any other scheme or relative URL
   return false;
+}
+
+/**
+ * Drop CSS that can load remote resources or break out of a style element.
+ * Keeps @keyframes, animation, and url(#fragment) / raster data images.
+ * @param {string} css
+ * @returns {string}
+ */
+export function sanitizeCss(css) {
+  let s = String(css ?? "");
+  for (let pass = 0; pass < 2; pass++) {
+    s = stripCssComments(s);
+    s = decodeCssEscapes(s);
+  }
+  s = stripCssComments(s);
+  s = s.replace(/<!--/g, "").replace(/-->/g, "");
+  // Prevent </style> breakout when the markup is later parsed as HTML.
+  s = s.replace(/</g, "");
+  s = stripAtBlocks(s, ["font-face", "document"]);
+  s = s.replace(/@import\b[^;{]*;?/gi, "");
+  s = s.replace(/@(charset|namespace)\b[^;{]*;?/gi, "");
+  s = s.replace(/expression\s*\(/gi, "(");
+  s = s.replace(/javascript\s*:/gi, "");
+  s = s.replace(/-moz-binding\s*:[^;}]*/gi, "");
+  s = s.replace(/behavior\s*:[^;}]*/gi, "");
+  s = s.replace(/position\s*:\s*fixed/gi, "position:static");
+  s = replaceUnsafeUrls(s);
+  return s.trim();
+}
+
+function stripCssComments(css) {
+  return String(css).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\*[\s\S]*$/g, "");
+}
+
+/** Decode CSS hex and single-character escapes so obfuscated url()/javascript: cannot slip through. */
+function decodeCssEscapes(input) {
+  let out = "";
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] !== "\\") {
+      out += input[i];
+      continue;
+    }
+    const hex = /^[0-9a-fA-F]{1,6}/.exec(input.slice(i + 1));
+    if (hex) {
+      const cp = parseInt(hex[0], 16);
+      i += hex[0].length;
+      const next = input[i + 1];
+      if (next === " " || next === "\n" || next === "\r" || next === "\t" || next === "\f") i += 1;
+      if (cp > 0 && cp <= 0x10ffff) out += String.fromCodePoint(cp);
+      continue;
+    }
+    if (i + 1 < input.length) {
+      out += input[i + 1];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * @param {string} css
+ * @param {string[]} names at-rule names without @
+ */
+function stripAtBlocks(css, names) {
+  const re = new RegExp(`@(${names.join("|")})\\b`, "gi");
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(css))) {
+    out += css.slice(last, m.index);
+    let i = re.lastIndex;
+    while (i < css.length && css[i] !== "{" && css[i] !== ";") i++;
+    if (css[i] === ";") {
+      i++;
+    } else if (css[i] === "{") {
+      let depth = 0;
+      for (; i < css.length; i++) {
+        if (css[i] === "{") depth++;
+        else if (css[i] === "}") {
+          depth--;
+          if (depth === 0) {
+            i++;
+            break;
+          }
+        }
+      }
+    }
+    last = i;
+    re.lastIndex = i;
+  }
+  out += css.slice(last);
+  return out;
+}
+
+/**
+ * @param {string} body
+ * @returns {boolean}
+ */
+function isSafeCssUrl(body) {
+  let v = String(body || "").trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+    (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  if (!v) return false;
+  const low = v.toLowerCase();
+  if (v.startsWith("#")) return !/[\s"'()]/.test(v);
+  if (low.startsWith("data:image/") && !low.startsWith("data:image/svg")) return true;
+  return false;
+}
+
+function replaceUnsafeUrls(css) {
+  let out = "";
+  let i = 0;
+  const lower = css.toLowerCase();
+  while (i < css.length) {
+    const idx = lower.indexOf("url(", i);
+    if (idx === -1) {
+      out += css.slice(i);
+      break;
+    }
+    out += css.slice(i, idx);
+    let j = idx + 4;
+    let depth = 1;
+    while (j < css.length && depth > 0) {
+      const ch = css[j];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (depth > 0) j++;
+      else break;
+    }
+    if (depth !== 0) break;
+    const body = css.slice(idx + 4, j);
+    out += isSafeCssUrl(body) ? `url(${body.trim()})` : "none";
+    i = j + 1;
+  }
+  return out;
 }
 
 function getDOMParser() {
@@ -103,6 +271,45 @@ function removeAttr(el, name) {
     }
     if (el.hasAttribute("xlink:href")) el.removeAttribute("xlink:href");
   }
+}
+
+function hrefOf(el) {
+  return (
+    el.getAttribute("href") ||
+    el.getAttribute("xlink:href") ||
+    ""
+  );
+}
+
+/**
+ * SMIL can animate href or event-handler attributes. Drop those animations.
+ * @param {Element} el
+ * @param {string} tag
+ * @returns {boolean} true if the element was removed
+ */
+function dropDangerousAnimation(el, tag) {
+  if (!MOTION_TAGS.has(tag)) return false;
+  const attrName = String(el.getAttribute("attributeName") || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^.*:/, "");
+  if (
+    attrName.startsWith("on") ||
+    attrName === "href" ||
+    attrName === "style"
+  ) {
+    el.parentNode?.removeChild(el);
+    return true;
+  }
+  for (const key of ["from", "to", "by", "values"]) {
+    if (!el.hasAttribute(key)) continue;
+    const raw = el.getAttribute(key) ?? "";
+    if (!/url\s*\(|javascript\s*:|expression\s*\(/i.test(raw)) continue;
+    const next = sanitizeCss(raw);
+    if (!next) el.removeAttribute(key);
+    else el.setAttribute(key, next);
+  }
+  return false;
 }
 
 /**
@@ -155,6 +362,17 @@ function walk(el) {
     return;
   }
 
+  // <use href="sprite.svg#id"> can pull in external documents. Fragments stay.
+  if (tag === "use") {
+    const href = String(hrefOf(el)).trim();
+    if (!href.startsWith("#") || !isSafeHref(href)) {
+      el.parentNode?.removeChild(el);
+      return;
+    }
+  }
+
+  if (dropDangerousAnimation(el, tag)) return;
+
   const attrs = Array.from(el.attributes || []);
   for (const attr of attrs) {
     const name = String(attr.name || "").toLowerCase();
@@ -180,11 +398,24 @@ function walk(el) {
       continue;
     }
 
-    // xlink:actuate etc. left alone; block style urls with external schemes
-    if (name === "style" && /url\s*\(\s*['"]?\s*(https?:|javascript:|data:text)/i.test(value)) {
-      removeAttr(el, attr.name);
-      continue;
+    // Presentation values and style="" — keep url(#id), drop remote loads.
+    if (name === "style" || /url\s*\(/i.test(value)) {
+      const next = sanitizeCss(value);
+      if (!next) removeAttr(el, attr.name);
+      else if (next !== value) el.setAttribute(attr.name, next);
     }
+  }
+
+  if (tag === "style") {
+    const kids = Array.from(el.children || []).filter((n) => n.nodeType === 1);
+    for (const child of kids) child.parentNode?.removeChild(child);
+    const css = sanitizeCss(el.textContent || "");
+    if (!css) {
+      el.parentNode?.removeChild(el);
+      return;
+    }
+    el.textContent = css;
+    return;
   }
 
   const children = Array.from(el.children || el.childNodes || []).filter(

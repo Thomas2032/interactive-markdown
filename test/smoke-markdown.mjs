@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { parseHTML, DOMParser } from "linkedom";
 import { marked } from "marked";
 import { renderDocument } from "../src/markdown.js";
@@ -21,6 +22,11 @@ function assert(name, cond, detail = "") {
     failed++;
     console.log("  FAIL", name, detail);
   }
+}
+
+function svgScope(container) {
+  const host = container.querySelector(".im-svg-host");
+  return host?.shadowRoot || host || container;
 }
 
 console.log("=== markdown smoke ===");
@@ -47,8 +53,8 @@ assert("has md heading", !!preview.querySelector(".im-md h1"), preview.innerHTML
 assert("has bold", !!preview.querySelector(".im-md strong"));
 assert("has ivm host", !!preview.querySelector(".im-ivm-host"));
 assert("has slider", !!preview.querySelector('.im-ivm-host input[type="range"]'));
-assert("has svg circle", !!preview.querySelector(".im-ivm-host svg circle"));
-assert("r default", preview.querySelector("circle").getAttribute("r") === "10");
+assert("has svg circle", !!svgScope(preview).querySelector("circle"));
+assert("r default", svgScope(preview).querySelector("circle").getAttribute("r") === "10");
 assert("trailing text", preview.textContent.includes("Trailing text"));
 
 // two fences
@@ -77,8 +83,21 @@ assert("two ivm hosts", preview.querySelectorAll(".im-ivm-host").length === 2);
 assert("toggle present", !!preview.querySelector('input[type="checkbox"]'));
 assert("text input present", !!preview.querySelector('input[type="text"]'));
 
-// plain md only
 m2.destroy();
+const agent = readFileSync(new URL("../examples/agent-loop.md", import.meta.url), "utf8");
+const agentMount = renderDocument(preview, agent, { marked });
+const fig = svgScope(preview).innerHTML || "";
+assert("agent loop svg", !!svgScope(preview).querySelector("svg"));
+assert("agent loop keyframes", /@keyframes\s+march/.test(fig), fig.slice(0, 300));
+assert("agent loop motion", /animateMotion/i.test(fig));
+assert("agent loop filter", /feGaussianBlur/i.test(fig));
+assert("agent loop symbol use", /<use\b/i.test(fig) && /href="#i-bolt"/.test(fig), fig);
+assert("agent loop stage", !!preview.querySelector(".im-ivm-static"));
+const withoutNs = fig.replaceAll('xmlns="http://www.w3.org/2000/svg"', "");
+assert("agent loop has no remote url", !/https?:\/\//i.test(withoutNs), withoutNs);
+agentMount.destroy();
+
+// plain md only
 renderDocument(preview, "## Only md\n\n- a\n- b\n", { marked });
 assert("list rendered", preview.querySelectorAll(".im-md li").length === 2);
 assert("no ivm", preview.querySelectorAll(".im-ivm-host").length === 0);

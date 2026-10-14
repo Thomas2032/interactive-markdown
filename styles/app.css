@@ -319,6 +319,22 @@ body {
   margin: 0 auto;
 }
 
+/* A figure with no controls (self-animated SVG) fills the preview instead of the widget card. */
+.im-ivm-static {
+  max-width: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.im-ivm-static .im-svg-host {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
 .im-errors {
   white-space: pre-wrap;
   color: var(--danger);

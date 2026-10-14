@@ -1,5 +1,5 @@
 import { DOMParser } from "linkedom";
-import { sanitizeSvg, isSafeHref, SAFE_SVG_TAGS } from "../src/sanitize-svg.js";
+import { sanitizeSvg, sanitizeCss, isSafeHref, SAFE_SVG_TAGS } from "../src/sanitize-svg.js";
 
 globalThis.DOMParser = DOMParser;
 // XMLSerializer intentionally omitted — module falls back to element.toString()
@@ -20,10 +20,13 @@ console.log("=== sanitize-svg smoke ===");
 
 assert("isSafeHref #", isSafeHref("#foo") === true);
 assert("isSafeHref data image", isSafeHref("data:image/png;base64,xx") === true);
+assert("isSafeHref rejects svg data", isSafeHref("data:image/svg+xml,xxx") === false);
 assert("isSafeHref http", isSafeHref("https://evil.test/x") === false);
 assert("isSafeHref javascript", isSafeHref("javascript:alert(1)") === false);
 assert("isSafeHref relative", isSafeHref("../x.svg") === false);
 assert("SAFE_SVG_TAGS has path", SAFE_SVG_TAGS.includes("path"));
+assert("SAFE_SVG_TAGS has style", SAFE_SVG_TAGS.includes("style"));
+assert("SAFE_SVG_TAGS has filter", SAFE_SVG_TAGS.includes("filter"));
 
 const clean = sanitizeSvg(`
 <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -54,7 +57,7 @@ const withScript = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg">
   <a href="https://evil.test">x</a>
   <image href="https://evil.test/a.png"/>
   <image href="data:image/png;base64,abc"/>
-  <use href="#g"/>
+  <use href="https://evil.test/sprite.svg#g"/>
 </svg>`);
 assert("strips script", !/<script\b/i.test(withScript), withScript);
 assert("strips foreignObject", !/foreignObject/i.test(withScript));
@@ -77,6 +80,48 @@ const xlink = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="
   <image xlink:href="#local"/>
 </svg>`);
 assert("strips xlink external", !/evil\.test/i.test(xlink), xlink);
+
+const animated = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url("https://evil.test/a.css");
+    @font-face { font-family: x; src: url(https://evil.test/a.woff); }
+    .a { background: url("https://evil.test/a.png"); filter: url(#glow); }
+    .b { background: \\75 rl(https://evil.test/b.png); }
+    @keyframes move { to { stroke-dashoffset: -20 } }
+    .dot { animation: move 1s infinite; }
+  </style>
+  <defs>
+    <filter id="glow"><feGaussianBlur stdDeviation="3"/></filter>
+    <symbol id="g"><circle r="2"/></symbol>
+  </defs>
+  <use href="#g"/>
+  <use href="../sprite.svg#g"/>
+  <rect width="10" height="10" filter="url(#glow)" marker-end="url(#ah)"/>
+  <animate attributeName="href" to="javascript:alert(1)"/>
+  <animate attributeName="opacity" from="0" to="1" dur="1s"/>
+  <animateMotion dur="2s" path="M0 0 H10"/>
+</svg>`);
+assert("keeps keyframes", /@keyframes\s+move/.test(animated), animated);
+assert("keeps animation class", /animation:\s*move/.test(animated), animated);
+assert("keeps fragment filter url", /url\(#glow\)/.test(animated), animated);
+assert("keeps marker url", /url\(#ah\)/.test(animated), animated);
+assert("keeps gaussian blur", /feGaussianBlur/i.test(animated), animated);
+assert("keeps internal use", /<use\b[^>]*href="#g"/i.test(animated), animated);
+assert("drops external use", (animated.match(/<use\b/gi) || []).length === 1, animated);
+assert("drops href animation", !/attributeName="href"/i.test(animated), animated);
+assert("keeps opacity animation", /attributeName="opacity"/i.test(animated), animated);
+assert("keeps animateMotion", /animateMotion/i.test(animated), animated);
+assert("animated svg has no remote url", !/evil\.test/i.test(animated), animated);
+assert("animated svg has no import", !/@import/i.test(animated), animated);
+assert("animated svg has no font-face", !/@font-face/i.test(animated), animated);
+assert("animated svg has no javascript", !/javascript/i.test(animated), animated);
+
+const css = sanitizeCss(
+  '@import "https://evil.test/x.css"; .a{filter:url(#glow)} </style><script>alert(1)</script>'
+);
+assert("css keeps fragment url", css.includes("url(#glow)"), css);
+assert("css strips breakout", !css.includes("<"), css);
+assert("css strips import host", !css.includes("evil.test"), css);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
