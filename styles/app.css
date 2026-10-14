@@ -385,6 +385,18 @@ body {
   overflow: hidden;
 }
 
+/* XY plots: white chart card, no dark SVG stage */
+.im-ivm-plot .im-svg-host {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 0.35rem;
+}
+
+.im-ivm-plot {
+  max-width: 640px;
+}
+
+
 .im-errors {
   white-space: pre-wrap;
   color: var(--danger);

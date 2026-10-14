@@ -12,6 +12,11 @@
  *   @calc         name = expression   (alias of @let; prefer @let in docs/generators)
  *   @svg [WxH]
  *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
+ *   @plot [WxH] [grid|nogrid]
+ *   @axis x|y: min..max [step=S] ["Label"]
+ *   @series [id] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N]
+ *     y = expression   (free var `x` + controls/@let)
+ *   @grid on|off
  *   @graph
  *   @animate [path=ortho|straight|curve] [quantity=N] [direction=forward|reverse] [speed=seconds]
  *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
@@ -19,6 +24,7 @@
  *
  * Defaults: step=1, timer loop=true, speed=30. Omitted "Label" → UI shows name.
  * `@svg 200x80` stores width/height so the renderer can wrap non-root markup.
+ * `@plot` builds a Cartesian chart (mutually exclusive with `@svg` / `@graph`).
  */
 
 /**
@@ -40,6 +46,23 @@
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: string, quantity: number, direction: string, speed: number }} GraphMotion
  * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
+ * @typedef {{ min: number, max: number, step?: number, label?: string }} PlotAxis
+ * @typedef {{
+ *   id?: string,
+ *   expression: string,
+ *   stroke?: string,
+ *   fill?: string,
+ *   fillOpacity?: number,
+ *   width?: number,
+ * }} PlotSeries
+ * @typedef {{
+ *   width: number|null,
+ *   height: number|null,
+ *   grid: boolean,
+ *   x: PlotAxis|null,
+ *   y: PlotAxis|null,
+ *   series: PlotSeries[],
+ * }} PlotModel
  * @typedef {{
  *   namespace: string|null,
  *   controls: Control[],
@@ -47,6 +70,7 @@
  *   svgWidth: number|null,
  *   svgHeight: number|null,
  *   graph: GraphModel|null,
+ *   plot: PlotModel|null,
  *   errors: string[],
  * }} IvmBlock
  */
@@ -184,6 +208,8 @@ export function parseIvm(body) {
   let svgHeight = null;
   /** @type {GraphModel | null} */
   let graph = null;
+  /** @type {PlotModel | null} */
+  let plot = null;
 
   const lines = String(body).replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -196,9 +222,160 @@ export function parseIvm(body) {
       continue;
     }
 
+    // @plot [WxH] [grid|nogrid]
+    if (/^@plot\b/i.test(line)) {
+      if (plot) {
+        errors.push("Duplicate @plot");
+        i++;
+        continue;
+      }
+      if (graph) {
+        errors.push("@plot cannot mix with @graph");
+        i++;
+        continue;
+      }
+      if (templateSvg) {
+        errors.push("@plot cannot mix with @svg");
+        i++;
+        continue;
+      }
+      plot = { width: null, height: null, grid: true, x: null, y: null, series: [] };
+      const rest = line.replace(/^@plot\b/i, "").trim();
+      if (rest) {
+        const size = rest.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\b/);
+        let flags = rest;
+        if (size) {
+          plot.width = Number(size[1]);
+          plot.height = Number(size[2]);
+          flags = rest.slice(size[0].length).trim();
+        }
+        if (/\bnogrid\b/i.test(flags)) plot.grid = false;
+        else if (/\bgrid\b/i.test(flags)) plot.grid = true;
+        const leftover = flags.replace(/\b(nogrid|grid)\b/gi, "").trim();
+        if (leftover) errors.push(`@plot: unknown ${leftover}`);
+      }
+      i++;
+      continue;
+    }
+
+    // @grid on|off
+    if (/^@grid\b/i.test(line)) {
+      if (!plot) {
+        errors.push("@grid is only valid after @plot");
+        i++;
+        continue;
+      }
+      const rest = line.replace(/^@grid\b/i, "").trim().toLowerCase();
+      if (rest === "off" || rest === "false" || rest === "0" || rest === "nogrid") plot.grid = false;
+      else if (rest === "on" || rest === "true" || rest === "1" || rest === "grid" || rest === "") plot.grid = true;
+      else errors.push(`@grid: expected on|off, got ${rest}`);
+      i++;
+      continue;
+    }
+
+    // @axis x|y: min..max [step=S] ["Label"]
+    {
+      const m = line.match(/^@axis\s+([xy])\s*:\s*(.+)$/i);
+      if (m) {
+        if (!plot) {
+          errors.push(`@axis ${m[1]}: only valid after @plot`);
+          i++;
+          continue;
+        }
+        const which = m[1].toLowerCase();
+        const [rest, label] = takeLabel(m[2]);
+        const rm = rest.match(
+          /^(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*(.*)$/
+        );
+        if (!rm) {
+          errors.push(`@axis ${which}: expected min..max [step=S]`);
+          i++;
+          continue;
+        }
+        const min = Number(rm[1]);
+        const max = Number(rm[2]);
+        const flags = parseFlags(rm[3] || "");
+        const step = flags.step !== undefined ? Number(flags.step) : undefined;
+        /** @type {PlotAxis} */
+        const axis = {
+          min: Number.isFinite(min) ? min : 0,
+          max: Number.isFinite(max) ? max : 1,
+        };
+        if (step !== undefined && Number.isFinite(step) && step > 0) axis.step = step;
+        if (label || flags.label) axis.label = label || flags.label;
+        if (which === "x") {
+          if (plot.x) errors.push("Duplicate @axis x");
+          plot.x = axis;
+        } else {
+          if (plot.y) errors.push("Duplicate @axis y");
+          plot.y = axis;
+        }
+        i++;
+        continue;
+      }
+    }
+
+    // @series [id] [flags] [y = expr]  — expression may continue on the next indented line
+    if (/^@series\b/i.test(line)) {
+      if (!plot) {
+        errors.push("@series is only valid after @plot");
+        i++;
+        continue;
+      }
+      const rest = line.replace(/^@series\b/i, "").trim();
+      /** @type {PlotSeries} */
+      const series = { expression: "" };
+      // Optional leading id (not a key=value and not y=)
+      let tail = rest;
+      const idMatch = tail.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
+      if (idMatch && !/^(stroke|fill|fillOpacity|width|y)$/i.test(idMatch[1])) {
+        series.id = idMatch[1];
+        tail = tail.slice(idMatch[0].length).trim();
+      }
+      // Inline y = expr?
+      const yInline = tail.match(/\by\s*=\s*(.+)$/i);
+      if (yInline) {
+        series.expression = yInline[1].trim();
+        tail = tail.slice(0, yInline.index).trim();
+      }
+      const flags = parseFlags(tail);
+      if (flags.stroke) series.stroke = flags.stroke;
+      if (flags.fill) series.fill = flags.fill;
+      if (flags.fillOpacity !== undefined) {
+        const n = Number(flags.fillOpacity);
+        if (Number.isFinite(n)) series.fillOpacity = n;
+      }
+      if (flags.width !== undefined) {
+        const n = Number(flags.width);
+        if (Number.isFinite(n)) series.width = n;
+      }
+      // Continuation: next non-empty line starting with y = or indented
+      if (!series.expression) {
+        let j = i + 1;
+        while (j < lines.length) {
+          const next = lines[j];
+          if (!next.trim() || next.trim().startsWith("#")) {
+            j++;
+            continue;
+          }
+          const cont = next.match(/^\s+y\s*=\s*(.+)$/i) || next.match(/^y\s*=\s*(.+)$/i);
+          if (cont) {
+            series.expression = cont[1].trim();
+            i = j;
+          }
+          break;
+        }
+      }
+      if (!series.expression) errors.push("@series: expected y = expression");
+      else plot.series.push(series);
+      i++;
+      continue;
+    }
+
     // @graph — following @node / @edge lines are an editable graph
     if (/^@graph$/i.test(line)) {
-      if (graph) errors.push("Duplicate @graph");
+      if (plot) errors.push("@graph cannot mix with @plot");
+      else if (graph) errors.push("Duplicate @graph");
       else graph = { nodes: [], edges: [] };
       i++;
       continue;
@@ -321,6 +498,11 @@ export function parseIvm(body) {
 
     // @svg [WxH] — remainder of fence is SVG markup
     if (/^@svg\b/i.test(line)) {
+      if (plot) {
+        errors.push("@svg cannot mix with @plot");
+        i++;
+        continue;
+      }
       const after = line.replace(/^@svg\b/i, "").trim();
       const size = after.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*$/);
       if (size) {
@@ -447,7 +629,7 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, templateSvg, svgWidth, svgHeight, graph, errors };
+  return { namespace, controls, templateSvg, svgWidth, svgHeight, graph, plot, errors };
 }
 
 /**

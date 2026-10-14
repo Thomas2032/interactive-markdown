@@ -6,6 +6,7 @@ import { evaluate, substitute } from "./expr.js";
 import { parseIvm } from "./parse-ivm.js";
 import { sanitizeSvg } from "./sanitize-svg.js";
 import { mountGraphEditor, serializeGraph } from "./graph-editor.js";
+import { buildPlotSvg, normalizePlot } from "./plot.js";
 
 /** @type {Map<string, Record<string, unknown>>} */
 const namespaces = new Map();
@@ -64,6 +65,8 @@ export function mountIvm(container, fenceBody, options = {}) {
       },
     };
   }
+
+  if (parsed.plot) container.classList.add("im-ivm-plot");
 
   const nsState = getNamespaceState(parsed.namespace);
   /** @type {Record<string, unknown>} */
@@ -182,6 +185,21 @@ export function mountIvm(container, fenceBody, options = {}) {
       const v = env[name];
       el.textContent =
         typeof v === "number" ? String(Math.round(v * 1000) / 1000) : String(v ?? "");
+    }
+    if (parsed.plot) {
+      const model = normalizePlot({
+        width: parsed.plot.width ?? undefined,
+        height: parsed.plot.height ?? undefined,
+        grid: parsed.plot.grid,
+        x: parsed.plot.x || undefined,
+        y: parsed.plot.y || undefined,
+        series: parsed.plot.series || [],
+      });
+      const filled = buildPlotSvg(model, env);
+      if (filled === lastFilled) return;
+      lastFilled = filled;
+      paintSvg(sanitizeSvg(filled));
+      return;
     }
     if (!parsed.templateSvg) {
       if (lastFilled !== "") {

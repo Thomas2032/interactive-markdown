@@ -123,5 +123,20 @@ assert("old template not @svg", old.templateSvg === null);
 const c = parseIvm(`# comment\n\n@slider n: 0..1 = 0\n@svg\n<svg/>\n`);
 assert("skips comments", c.controls.length === 1 && c.errors.length === 0);
 
+
+// Cartesian @plot
+const plot = parseIvm(`
+@plot 480x320
+@axis x: -10..10 step=2 "x"
+@axis y: 0..0.8 step=0.2 "density"
+@slider mu: -5..5 = 0
+@series density stroke=#6d28d9 fill=#7c3aed fillOpacity=0.25
+  y = exp(-x*x)
+`);
+assert("plot errors", plot.errors.length === 0, JSON.stringify(plot.errors));
+assert("plot model", !!plot.plot && plot.plot.series.length === 1);
+assert("plot size", plot.plot.width === 480 && plot.plot.height === 320);
+assert("plot axis label", plot.plot.y.label === "density");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
