@@ -5,6 +5,7 @@
 
 import { parseIvm, splitIvmFences } from "./parse-ivm.js";
 import { quoteGraphLabel, serializeGraph } from "./graph-editor.js";
+import { normalizePlot, serializePlotLines } from "./plot.js";
 
 /** @typedef {'rect'|'circle'|'ellipse'|'line'|'path'|'text'} ShapeType */
 /** @typedef {{ type: ShapeType, attrs: Record<string, string> }} Shape */
@@ -76,6 +77,26 @@ export function serializeDocument(blocks) {
 export function serializeFigure(block) {
   if (!block) return "\n";
   if (block.type === "graph") return serializeGraph(block.model || { nodes: [], edges: [] });
+  if (block.type === "plot") {
+    const rebuilt = [];
+    if (block.namespace) rebuilt.push(`@ns ${block.namespace}`);
+    const plotLines = serializePlotLines(normalizePlot(block.plot || {}));
+    const preamble = [];
+    const series = [];
+    let sawSeries = false;
+    for (const line of plotLines) {
+      if (/^@series\b/i.test(line)) sawSeries = true;
+      if (sawSeries) series.push(line);
+      else preamble.push(line);
+    }
+    rebuilt.push(...preamble);
+    for (const control of block.controls || []) {
+      const line = serializeControl(control);
+      if (line) rebuilt.push(line);
+    }
+    rebuilt.push(...series);
+    return rebuilt.join("\n").replace(/\s*$/, "\n");
+  }
   if (block.type !== "figure") return "\n";
   const lines = [];
   if (block.namespace) lines.push(`@ns ${block.namespace}`);
@@ -133,6 +154,8 @@ export function insertFeature(doc, feature, options = {}) {
       fig.shapes = [shape];
       place(fig);
     }
+  } else if (feature === "plot") {
+    place(emptyPlot());
   } else if (feature === "slider" || feature === "timer" || feature === "input" || feature === "toggle" || feature === "formula") {
     const kind = feature === "formula" ? "let" : feature;
     const control = defaultControl(kind, nextControlName(blocks, CONTROL_PREFIX[kind]));
@@ -198,7 +221,7 @@ export function updateControl(doc, blockId, index, patch) {
   return {
     blocks: (doc?.blocks || []).map((b) => {
       const copy = cloneBlock(b);
-      if (copy.id === blockId && copy.type === "figure" && copy.controls[index]) {
+      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot") && copy.controls[index]) {
         copy.controls[index] = cloneControl({ ...copy.controls[index], ...patch });
       }
       return copy;
@@ -216,7 +239,7 @@ export function removeControl(doc, blockId, index) {
   return {
     blocks: (doc?.blocks || []).map((b) => {
       const copy = cloneBlock(b);
-      if (copy.id === blockId && copy.type === "figure") {
+      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot")) {
         copy.controls = copy.controls.filter((_, i) => i !== index);
       }
       return copy;
@@ -264,6 +287,64 @@ export function removeShape(doc, blockId, index) {
   };
 }
 
+
+/**
+ * @param {{ blocks?: object[] }} doc
+ * @param {string} blockId
+ * @param {"x"|"y"} which
+ * @param {object} patch
+ * @returns {{ blocks: object[] }}
+ */
+export function updatePlotAxis(doc, blockId, which, patch) {
+  return {
+    blocks: (doc?.blocks || []).map((b) => {
+      const copy = cloneBlock(b);
+      if (copy.id === blockId && copy.type === "plot" && copy.plot) {
+        const axis = { ...(copy.plot[which] || {}), ...patch };
+        copy.plot = { ...copy.plot, [which]: axis };
+      }
+      return copy;
+    }),
+  };
+}
+
+/**
+ * @param {{ blocks?: object[] }} doc
+ * @param {string} blockId
+ * @param {number} index
+ * @param {object} patch
+ * @returns {{ blocks: object[] }}
+ */
+export function updatePlotSeries(doc, blockId, index, patch) {
+  return {
+    blocks: (doc?.blocks || []).map((b) => {
+      const copy = cloneBlock(b);
+      if (copy.id === blockId && copy.type === "plot" && copy.plot?.series?.[index]) {
+        copy.plot.series[index] = { ...copy.plot.series[index], ...patch };
+      }
+      return copy;
+    }),
+  };
+}
+
+/**
+ * @param {{ blocks?: object[] }} doc
+ * @param {string} blockId
+ * @param {object} patch
+ * @returns {{ blocks: object[] }}
+ */
+export function updatePlotMeta(doc, blockId, patch) {
+  return {
+    blocks: (doc?.blocks || []).map((b) => {
+      const copy = cloneBlock(b);
+      if (copy.id === blockId && copy.type === "plot" && copy.plot) {
+        copy.plot = { ...copy.plot, ...patch };
+      }
+      return copy;
+    }),
+  };
+}
+
 export { NAME_RE };
 
 function emptyFigure() {
@@ -278,13 +359,57 @@ function emptyFigure() {
   };
 }
 
+function emptyPlot() {
+  return {
+    id: nid(),
+    type: "plot",
+    namespace: null,
+    controls: [
+      { kind: "slider", name: "mu", range: [-5, 5], step: 0.1, default: 0, label: "μ (mean)" },
+      { kind: "slider", name: "sigma", range: [0.5, 4], step: 0.1, default: 1.5, label: "σ (std dev)" },
+    ],
+    plot: {
+      width: 480,
+      height: 320,
+      grid: true,
+      x: { min: -10, max: 10, step: 2, label: "x" },
+      y: { min: 0, max: 0.8, step: 0.2, label: "density" },
+      series: [
+        {
+          id: "density",
+          expression: "(1/(sigma*sqrt(2*pi))) * exp(-0.5*((x-mu)/sigma)^2)",
+          stroke: "#6d28d9",
+          fill: "#7c3aed",
+          fillOpacity: 0.25,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * @param {object | null | undefined} plot
+ */
+function copyPlotModel(plot) {
+  const model = normalizePlot(plot || {});
+  return {
+    width: model.width,
+    height: model.height,
+    grid: model.grid,
+    samples: model.samples,
+    x: { ...model.x },
+    y: { ...model.y },
+    series: model.series.map((s) => ({ ...s })),
+  };
+}
+
 /**
  * @param {object[]} blocks
  * @param {string} [id]
  */
 function findFigure(blocks, id) {
   if (!id) return null;
-  const block = blocks.find((b) => b.id === id && b.type === "figure");
+  const block = blocks.find((b) => b.id === id && (b.type === "figure" || b.type === "plot"));
   return block || null;
 }
 
@@ -295,7 +420,7 @@ function findFigure(blocks, id) {
 function nextControlName(blocks, prefix) {
   const used = new Set();
   for (const block of blocks) {
-    if (block.type !== "figure") continue;
+    if (block.type !== "figure" && block.type !== "plot") continue;
     for (const control of block.controls || []) {
       if (control.name) used.add(control.name);
     }
@@ -407,6 +532,15 @@ function blockFromIvm(body) {
       model: copyGraphModel(parsed.graph),
     };
   }
+  if (parsed.plot) {
+    return {
+      id: nid(),
+      type: "plot",
+      namespace: parsed.namespace,
+      controls: parsed.controls.map(cloneControl),
+      plot: copyPlotModel(parsed.plot),
+    };
+  }
   const raw = parsed.templateSvg;
   const template = wrapSlimSvg(raw, parsed.svgWidth, parsed.svgHeight);
   const shapes = template ? tryParseShapes(template) : [];
@@ -515,10 +649,7 @@ function serializeBlock(block) {
     return (block.items || []).map((item) => `- ${item}`).join("\n");
   }
   if (block.type === "markdown") return String(block.text ?? "");
-  if (block.type === "graph") {
-    return "```ivm\n" + serializeFigure(block).replace(/\s*$/, "\n") + "```";
-  }
-  if (block.type === "figure") {
+  if (block.type === "graph" || block.type === "figure" || block.type === "plot") {
     return "```ivm\n" + serializeFigure(block).replace(/\s*$/, "\n") + "```";
   }
   return "";
@@ -621,6 +752,13 @@ function cloneBlock(block) {
   if (block.type === "bullets") return { ...block, items: (block.items || []).slice() };
   if (block.type === "graph") {
     return { ...block, model: copyGraphModel(block.model) };
+  }
+  if (block.type === "plot") {
+    return {
+      ...block,
+      controls: (block.controls || []).map(cloneControl),
+      plot: copyPlotModel(block.plot),
+    };
   }
   if (block.type === "figure") {
     return {

@@ -14,6 +14,9 @@ import {
   updateBlock,
   updateControl,
   updateShape,
+  updatePlotAxis,
+  updatePlotSeries,
+  updatePlotMeta,
   NAME_RE,
 } from "./document.js";
 import { mountGraphEditor } from "./graph-editor.js";
@@ -50,6 +53,7 @@ const ADD_GROUPS = [
       ["shape", "Shape: line", "line"],
       ["shape", "Shape: path", "path"],
       ["shape", "Shape: text", "text"],
+      ["plot", "XY plot"],
       ["graph", "Graph"],
     ],
   },
@@ -124,7 +128,7 @@ export function mountDocumentEditor(container, source, options = {}) {
 
   const empty = docEl.createElement("p");
   empty.className = "im-doc-empty";
-  empty.textContent = "Drag from Add to place a heading, a control, a shape, or a graph.";
+  empty.textContent = "Drag from Add to place a heading, a control, a shape, a plot, or a graph.";
 
   const blocksEl = docEl.createElement("div");
   blocksEl.className = "im-doc-blocks";
@@ -185,12 +189,12 @@ export function mountDocumentEditor(container, source, options = {}) {
       prose = [];
     };
     for (const block of doc.blocks) {
-      if (block.type === "figure" || block.type === "graph") {
+      if (block.type === "figure" || block.type === "graph" || block.type === "plot") {
         flush();
         const el = renderBlock(block);
         el.dataset.at = String(index);
         el.dataset.atEnd = String(index + 1);
-        if (block.type === "figure") el.dataset.figureId = block.id;
+        if (block.type === "figure" || block.type === "plot") el.dataset.figureId = block.id;
         blocksEl.appendChild(el);
         index++;
       } else {
@@ -317,6 +321,62 @@ export function mountDocumentEditor(container, source, options = {}) {
         remove.textContent = "Remove animation";
         box.append(note, remove);
       }
+      return box;
+    }
+    if (block.type === "plot") {
+      const ns = input("text", block.namespace || "");
+      ns.dataset.field = "namespace";
+      box.appendChild(field("Shared name", ns));
+      const grid = input("checkbox", "");
+      grid.checked = block.plot?.grid !== false;
+      grid.dataset.field = "plotGrid";
+      box.appendChild(field("Grid", grid));
+      for (const which of ["x", "y"]) {
+        const axis = block.plot?.[which] || {};
+        const group = docEl.createElement("fieldset");
+        group.className = "im-doc-sub";
+        const legend = docEl.createElement("legend");
+        legend.textContent = which.toUpperCase() + " axis";
+        group.appendChild(legend);
+        for (const [key, value, title] of [
+          ["min", axis.min, "Min"],
+          ["max", axis.max, "Max"],
+          ["step", axis.step, "Step"],
+          ["label", axis.label || "", "Label"],
+        ]) {
+          const el = input(key === "label" ? "text" : "number", value ?? "");
+          el.dataset.plotAxis = which;
+          el.dataset.field = key;
+          group.appendChild(field(title, el));
+        }
+        box.appendChild(group);
+      }
+      (block.plot?.series || []).forEach((series, index) => {
+        const group = docEl.createElement("fieldset");
+        group.className = "im-doc-sub";
+        const legend = docEl.createElement("legend");
+        legend.textContent = "Series" + (series.id ? ` ${series.id}` : "");
+        group.appendChild(legend);
+        const expr = textarea(series.expression || "", 3);
+        expr.dataset.plotSeries = String(index);
+        expr.dataset.field = "expression";
+        group.appendChild(field("y =", expr));
+        for (const [key, value, title] of [
+          ["stroke", series.stroke || "", "Stroke"],
+          ["fill", series.fill || "", "Fill"],
+          ["fillOpacity", series.fillOpacity ?? 0.25, "Fill opacity"],
+          ["width", series.width ?? 2.25, "Width"],
+        ]) {
+          const el = input(key === "stroke" || key === "fill" ? "text" : "number", value);
+          el.dataset.plotSeries = String(index);
+          el.dataset.field = key;
+          group.appendChild(field(title, el));
+        }
+        box.appendChild(group);
+      });
+      (block.controls || []).forEach((control, index) => {
+        box.appendChild(renderControl(control, index));
+      });
       return box;
     }
     if (block.type === "figure") {
@@ -511,7 +571,7 @@ export function mountDocumentEditor(container, source, options = {}) {
   function refreshFigure(id) {
     const block = doc.blocks.find((b) => b.id === id);
     const host = blocksEl.querySelector(`.im-doc-block[data-id="${id}"] .im-doc-live-host`);
-    if (!block || block.type !== "figure" || !host) return;
+    if (!block || (block.type !== "figure" && block.type !== "plot") || !host) return;
     const prev = mounts.get(id);
     if (prev) {
       prev.destroy();
@@ -729,6 +789,15 @@ export function mountDocumentEditor(container, source, options = {}) {
       commit();
       return;
     }
+    if (feature === "plot") {
+      const at = placement && !placement.figureId ? placement.at : undefined;
+      const result = insertFeature(doc, "plot", { at });
+      doc = result.doc;
+      selectedId = result.focusId || selectedId;
+      paint();
+      commit();
+      return;
+    }
     if (feature === "shape" && !shapeType) shapeType = "rect";
     /** @type {string | undefined} */
     let figureId;
@@ -739,7 +808,7 @@ export function mountDocumentEditor(container, source, options = {}) {
       at = figureId ? undefined : placement.at;
     } else {
       const selected = doc.blocks.find((b) => b.id === selectedId);
-      figureId = selected && selected.type === "figure" ? selected.id : undefined;
+      figureId = selected && (selected.type === "figure" || selected.type === "plot") ? selected.id : undefined;
     }
     const result = insertFeature(doc, feature, { figureId, shapeType, at });
     doc = result.doc;
@@ -864,6 +933,42 @@ export function mountDocumentEditor(container, source, options = {}) {
       commit();
       return;
     }
+    if (fieldName === "plotGrid") {
+      doc = { blocks: updatePlotMeta(doc, id, { grid: !!el.checked }).blocks };
+      refreshFigure(id);
+      commit();
+      return;
+    }
+    if (el.dataset.plotAxis) {
+      const which = el.dataset.plotAxis;
+      const patch = {};
+      if (fieldName === "label") patch.label = el.value;
+      else {
+        const n = Number(el.value);
+        if (!Number.isFinite(n)) return;
+        if (fieldName === "step" && n <= 0) return;
+        patch[fieldName] = n;
+      }
+      doc = { blocks: updatePlotAxis(doc, id, which, patch).blocks };
+      refreshFigure(id);
+      commit();
+      return;
+    }
+    if (el.dataset.plotSeries != null) {
+      const index = Number(el.dataset.plotSeries);
+      const patch = {};
+      if (fieldName === "expression" || fieldName === "stroke" || fieldName === "fill") {
+        patch[fieldName] = el.value;
+      } else {
+        const n = Number(el.value);
+        if (!Number.isFinite(n)) return;
+        patch[fieldName] = n;
+      }
+      doc = { blocks: updatePlotSeries(doc, id, index, patch).blocks };
+      refreshFigure(id);
+      commit();
+      return;
+    }
     if (fieldName === "viewBox") {
       doc = { blocks: updateBlock(doc, id, { viewBox: el.value }).blocks };
       refreshFigure(id);
@@ -938,6 +1043,7 @@ function kindLabel(block) {
   if (block.type === "bullets") return "Bullets";
   if (block.type === "markdown") return "Markdown";
   if (block.type === "graph") return "Graph";
+  if (block.type === "plot") return "XY plot";
   if (block.type === "figure" && block.customSvg) return "Animated figure";
   if (block.type === "figure") return "Figure";
   return "Block";

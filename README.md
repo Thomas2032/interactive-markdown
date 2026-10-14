@@ -1,6 +1,6 @@
 # Interactive Markdown (IVM)
 
-**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language, plus a **graph editor** stored in the same fence.
+**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language, plus **Cartesian XY plots** and a **graph editor** stored in the same fence.
 
 Write Markdown as usual. Add an `ivm` fenced block when you want interactive SVG or a directed graph you can edit in the preview. The format stays AI-friendly: readable text an agent can generate like normal Markdown.
 
@@ -15,6 +15,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
+- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves
 - Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename; edits write back into the fence)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
@@ -43,7 +44,7 @@ npx serve .
 
 ## Graph editor tab
 
-The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path. Each change rewrites the source. The right pane is the rendered preview.
+The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, XY plots, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path. Each change rewrites the source. The right pane is the rendered preview.
 
 ## IVM dialect (quick reference)
 
@@ -75,6 +76,10 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is full SVG markup |
 | `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
+| `@plot [WxH] [grid\|nogrid]` | Cartesian XY plot (mutually exclusive with `@svg` / `@graph`) |
+| `@axis x\|y: min..max [step=S] ["Label"]` | Plot axis range and label |
+| `@series [id] …` / `y = expr` | Plot series (free var `x`) |
+| `@grid on\|off` | Plot grid toggle |
 | `@graph` | Start an editable directed graph. This is the first directive in that fence |
 | `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
 | `@edge from -> to` | Directed edge. Add `from=top\|right\|bottom\|left` and `to=top\|right\|bottom\|left` to choose the sides. Defaults are `from=right` and `to=left` |
@@ -111,6 +116,32 @@ A fence that starts with `@graph` is a node-and-edge diagram. The preview is the
 @edge start -> step
 ```
 ````
+
+
+### XY plot
+
+A fence that starts with `@plot` draws a Cartesian chart. Axes, grid, and series are declared in the dialect; the renderer builds the SVG. Sliders and `@let` work the same as in figure blocks. Free variable `x` is sampled across the X axis when evaluating each series. Do not mix `@svg` or `@graph` into the same fence.
+
+````markdown
+```ivm
+@plot
+@axis x: -10..10 step=2 "x"
+@axis y: 0..0.8 step=0.2 "density"
+@slider mu: -5..5 = 0 step=0.1 "μ (mean)"
+@slider sigma: 0.5..4 = 1.5 step=0.1 "σ (std dev)"
+@series density stroke=#6d28d9 fill=#7c3aed fillOpacity=0.25
+  y = (1/(sigma*sqrt(2*pi))) * exp(-0.5*((x-mu)/sigma)^2)
+```
+````
+
+| Line | Meaning |
+|------|---------|
+| `@plot [WxH] [grid\|nogrid]` | Start an XY plot (default size 480×320, grid on) |
+| `@axis x\|y: min..max [step=S] ["Label"]` | Axis range, tick step, and title |
+| `@series [id] [stroke=#…] [fill=#…] [fillOpacity=N] [width=N]` | Curve style; next line (or same line) `y = expr` |
+| `@grid on\|off` | Toggle the background grid |
+
+Defaults: grid **on**, fill opacity **0.25**, stroke `#6d28d9`, fill `#7c3aed`.
 
 ### Expressions (`{{…}}`)
 
@@ -151,6 +182,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/circular-motion.md`](examples/circular-motion.md) — point on a circle with spin animation
 - [`examples/agent-loop.md`](examples/agent-loop.md) — agent loop drawn as an animated graph
 - [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
+- [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
 
 ## Project layout
 
@@ -167,6 +199,7 @@ src/
   sanitize-svg.js   SVG sanitizer
   render.js         Controls + SVG binding
   graph-editor.js   Graph model and canvas editor
+  plot.js           Cartesian XY plot SVG builder
 styles/app.css
 examples/
 test/               Node smoke tests
@@ -178,7 +211,7 @@ test/               Node smoke tests
 npm test
 ```
 
-Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, and preview document builder (`linkedom` is used where a DOM is required).
+Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, XY plots, and preview document builder (`linkedom` is used where a DOM is required).
 
 ## License
 

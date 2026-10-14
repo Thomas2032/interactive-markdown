@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
-  "version": "0.2.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG, a preview block builder, and an editable graph",
+  "version": "0.3.0",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, a preview block builder, and an editable graph",
   "main": "./src/index.js",
   "directories": {
     "example": "examples",
@@ -9,14 +9,15 @@
   },
   "scripts": {
     "start": "serve .",
-    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs && node test/smoke-graph.mjs && node test/smoke-document.mjs",
+    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs && node test/smoke-graph.mjs && node test/smoke-plot.mjs && node test/smoke-document.mjs",
     "test:expr": "node test/smoke-expr.mjs",
     "test:parse": "node test/smoke-parse-ivm.mjs",
     "test:sanitize": "node test/smoke-sanitize-svg.mjs",
     "test:render": "node test/smoke-render.mjs",
     "test:markdown": "node test/smoke-markdown.mjs",
     "test:graph": "node test/smoke-graph.mjs",
-    "test:document": "node test/smoke-document.mjs"
+    "test:document": "node test/smoke-document.mjs",
+    "test:plot": "node test/smoke-plot.mjs"
   },
   "repository": {
     "type": "git",
@@ -49,7 +50,8 @@
     "./parse-ivm": "./src/parse-ivm.js",
     "./sanitize-svg": "./src/sanitize-svg.js",
     "./render": "./src/render.js",
-    "./markdown": "./src/markdown.js"
+    "./markdown": "./src/markdown.js",
+    "./plot": "./src/plot.js"
   },
   "files": [
     "src",
