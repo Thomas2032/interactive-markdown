@@ -80,13 +80,14 @@ export function mountIvm(container, fenceBody, options = {}) {
     if (parsed.namespace) nsState[c.name] = val;
   }
 
+  const hasControls = parsed.controls.some((c) => c.kind !== "let" && c.name != null);
+  if (!hasControls) container.classList.add("im-ivm-static");
+
   const controlsEl = doc.createElement("div");
   controlsEl.className = "im-controls";
-  container.appendChild(controlsEl);
 
   const svgHost = doc.createElement("div");
   svgHost.className = "im-svg-host";
-  container.appendChild(svgHost);
 
   /** @type {Array<() => void>} */
   const cleanups = [];
@@ -114,6 +115,50 @@ export function mountIvm(container, fenceBody, options = {}) {
     return env;
   }
 
+  /** Skip DOM writes when the substituted source is unchanged so CSS and SMIL keep running. */
+  let lastFilled = null;
+
+  /**
+   * Mount markup in a shadow root so <style> in the figure cannot restyle the editor.
+   * transform on the host makes position:fixed a local containing block.
+   * @param {string} markup
+   */
+  function paintSvg(markup) {
+    let shadow = svgHost.shadowRoot;
+    if (!shadow && typeof svgHost.attachShadow === "function") {
+      try {
+        shadow = svgHost.attachShadow({ mode: "open" });
+      } catch (_) {
+        shadow = null;
+      }
+    }
+    const target = shadow || svgHost;
+    const doc = svgHost.ownerDocument || globalThis.document;
+    target.innerHTML = "";
+    if (!markup) return;
+
+    // Scope figure CSS to this widget. transform makes position:fixed local.
+    if (shadow && doc?.createElement) {
+      const frame = doc.createElement("style");
+      frame.textContent =
+        ":host{display:block;overflow:hidden;transform:translate(0)}" +
+        "svg{display:block;max-width:100%;height:auto;margin:0 auto}" +
+        "@media (prefers-reduced-motion:reduce){:host *{animation:none!important}}";
+      target.appendChild(frame);
+    }
+
+    // Parse as XML and adopt the node. innerHTML would lowercase camelCase
+    // SVG tags (radialGradient, feGaussianBlur, animateMotion) and drop them.
+    const Parser = globalThis.DOMParser;
+    if (!Parser) return;
+    const parsed = new Parser().parseFromString(markup, "image/svg+xml");
+    const root = parsed.documentElement;
+    const rootName = String(root?.localName || root?.tagName || "").toLowerCase();
+    if (!root || rootName === "parsererror" || rootName !== "svg") return;
+    const node = typeof doc.importNode === "function" ? doc.importNode(root, true) : root;
+    target.appendChild(node);
+  }
+
   function rebind() {
     const env = buildEnv();
     for (const [name, el] of valueLabels) {
@@ -122,11 +167,16 @@ export function mountIvm(container, fenceBody, options = {}) {
         typeof v === "number" ? String(Math.round(v * 1000) / 1000) : String(v ?? "");
     }
     if (!parsed.templateSvg) {
-      svgHost.innerHTML = "";
+      if (lastFilled !== "") {
+        lastFilled = "";
+        paintSvg("");
+      }
       return;
     }
     const filled = substitute(parsed.templateSvg, env);
-    svgHost.innerHTML = sanitizeSvg(filled);
+    if (filled === lastFilled) return;
+    lastFilled = filled;
+    paintSvg(sanitizeSvg(filled));
   }
 
   function setVar(name, value) {
@@ -260,6 +310,9 @@ export function mountIvm(container, fenceBody, options = {}) {
       controlsEl.appendChild(row);
     }
   }
+
+  if (hasControls) container.appendChild(controlsEl);
+  container.appendChild(svgHost);
 
   rebind();
 

@@ -40,6 +40,11 @@ function assert(name, cond, detail = "") {
   }
 }
 
+function svgScope(container) {
+  const host = container.querySelector(".im-svg-host");
+  return host?.shadowRoot || host || container;
+}
+
 console.log("=== render smoke ===");
 resetNamespaces();
 
@@ -57,14 +62,15 @@ const body = `
 const mount = mountIvm(host, body);
 assert("mounts controls", host.querySelectorAll("input[type=range]").length === 2);
 assert("play button", !!host.querySelector("button.im-timer-btn"));
-assert("svg present", !!host.querySelector("svg circle"));
+assert("svg present", !!svgScope(host).querySelector("svg circle"));
+assert("controlled widget", host.classList.contains("im-ivm") && !host.classList.contains("im-ivm-static"));
 
 const state0 = mount.getState();
 assert("default amp", state0.amp === 30);
 assert("default t", state0.t === 0);
 assert("let y at t0", Math.abs(state0.y - 40) < 1e-9, String(state0.y));
 
-const circle = host.querySelector("svg circle");
+const circle = svgScope(host).querySelector("svg circle");
 assert("r bound", circle.getAttribute("r") === "30");
 assert("cy bound", circle.getAttribute("cy") === "40");
 
@@ -74,7 +80,7 @@ ampInput.value = "50";
 ampInput.dispatchEvent(new window.Event("input", { bubbles: true }));
 const state1 = mount.getState();
 assert("amp updated", state1.amp === 50);
-assert("svg r updated", host.querySelector("svg circle").getAttribute("r") === "50");
+assert("svg r updated", svgScope(host).querySelector("svg circle").getAttribute("r") === "50");
 
 // timer play advances t and rebinds
 const btn = host.querySelector("button.im-timer-btn");
@@ -84,7 +90,7 @@ drainRaf(3, 100);
 const state2 = mount.getState();
 assert("timer advanced", state2.t > 0, String(state2.t));
 assert("y changed", state2.y !== 40, String(state2.y));
-const cy = host.querySelector("svg circle").getAttribute("cy");
+const cy = svgScope(host).querySelector("svg circle").getAttribute("cy");
 assert("cy rebound", cy !== "40", cy);
 
 // destroy
@@ -122,8 +128,31 @@ mountIvm(
   `@svg
 <svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="1"/></svg>`
 );
-assert("sanitized script", !/script/i.test(unsafeHost.innerHTML));
-assert("kept circle", /circle/i.test(unsafeHost.innerHTML));
+const unsafeMarkup = svgScope(unsafeHost).innerHTML;
+assert("sanitized script", !/<script\b/i.test(unsafeMarkup), unsafeMarkup);
+assert("kept circle", /<circle\b/i.test(unsafeMarkup), unsafeMarkup);
+
+resetNamespaces();
+const animHost = document.createElement("div");
+document.body.appendChild(animHost);
+mountIvm(
+  animHost,
+  `@svg
+<svg xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @keyframes pulse { from { opacity: 0.2 } to { opacity: 1 } }
+    .dot { animation: pulse 1.2s ease-in-out infinite; filter: url(#glow); }
+  </style>
+  <defs><filter id="glow"><feGaussianBlur stdDeviation="2"/></filter></defs>
+  <circle class="dot" r="4" fill="#fff" filter="url(#glow)"/>
+</svg>`
+);
+const animScope = svgScope(animHost);
+assert("static figure", animHost.classList.contains("im-ivm-static"));
+assert("no control row", !animHost.querySelector(".im-controls"));
+assert("keyframes scoped", /@keyframes\s+pulse/.test(animScope.innerHTML), animScope.innerHTML.slice(0, 240));
+assert("keyframes not in light dom", !/@keyframes/.test(animHost.innerHTML));
+assert("animated circle", animScope.querySelector("circle")?.getAttribute("class") === "dot");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
