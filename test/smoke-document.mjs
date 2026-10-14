@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseHTML, DOMParser } from "linkedom";
+import { marked } from "marked";
 import { insertFeature, parseDocument, serializeDocument } from "../src/document.js";
 import { mountDocumentEditor } from "../src/document-editor.js";
 
@@ -128,6 +129,16 @@ const addNode = graphHost.querySelector('.im-graph-bar [data-action="add"]');
 addNode.dispatchEvent(new window.Event("click", { bubbles: true }));
 assert("graph add writes a node", typeof graphSeen === "string" && /@node n1:/.test(graphSeen), graphSeen);
 assert("graph add leaves the canvas mounted", !!graphHost.querySelector(".im-graph-canvas"));
+
+const proseHost = document.createElement("div");
+document.body.appendChild(proseHost);
+mountDocumentEditor(proseHost, read("amplitude.md"), { marked });
+const prose = proseHost.querySelectorAll(".im-doc-prose");
+assert("prose regions", prose.length === 2);
+assert("heading renders as html", prose[0]?.querySelector("h1")?.textContent === "Wave amplitude");
+assert("later prose renders as html", prose[1]?.querySelector("h2")?.textContent === "Tips");
+assert("prose is not wrapped in a block", ![...prose].some((el) => el.closest(".im-doc-block")));
+assert("one interactive block", proseHost.querySelectorAll(".im-doc-block").length === 1);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

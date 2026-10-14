@@ -45,7 +45,7 @@ const ADD_BUTTONS = [
 /**
  * @param {HTMLElement} container
  * @param {string} source
- * @param {{ onChange?: (markdown: string) => void, onStatus?: (message: string) => void }} [options]
+ * @param {{ onChange?: (markdown: string) => void, onStatus?: (message: string) => void, marked?: { parse: (markdown: string) => string } }} [options]
  * @returns {{ destroy: () => void }}
  */
 export function mountDocumentEditor(container, source, options = {}) {
@@ -85,7 +85,7 @@ export function mountDocumentEditor(container, source, options = {}) {
 
   const help = docEl.createElement("p");
   help.className = "im-doc-help";
-  help.textContent = "Labels and expressions are typed here. The markdown source is written for you.";
+  help.textContent = "Prose stays formatted text. Sliders, figures, and graphs stay blocks. Labels and expressions are typed in the block.";
 
   const empty = docEl.createElement("p");
   empty.className = "im-doc-empty";
@@ -127,7 +127,41 @@ export function mountDocumentEditor(container, source, options = {}) {
     resetNamespaces();
     blocksEl.innerHTML = "";
     empty.hidden = doc.blocks.length > 0;
-    for (const block of doc.blocks) blocksEl.appendChild(renderBlock(block));
+    /** @type {object[]} */
+    let prose = [];
+    const flush = () => {
+      if (!prose.length) return;
+      blocksEl.appendChild(renderProse(prose));
+      prose = [];
+    };
+    for (const block of doc.blocks) {
+      if (block.type === "figure" || block.type === "graph") {
+        flush();
+        blocksEl.appendChild(renderBlock(block));
+      } else prose.push(block);
+    }
+    flush();
+  }
+
+  /**
+   * Headings, paragraphs, and lists render as HTML. They are not blocks.
+   * @param {object[]} blocks
+   */
+  function renderProse(blocks) {
+    const wrap = docEl.createElement("div");
+    wrap.className = "im-md im-doc-prose";
+    const markdown = serializeDocument(blocks).trim();
+    const parser = options.marked || globalThis.marked;
+    if (parser && typeof parser.parse === "function") {
+      try {
+        wrap.innerHTML = parser.parse(markdown);
+        return wrap;
+      } catch (_) {
+        /* fall through to plain text */
+      }
+    }
+    wrap.textContent = markdown;
+    return wrap;
   }
 
   /**
@@ -150,22 +184,14 @@ export function mountDocumentEditor(container, source, options = {}) {
     el.appendChild(row);
 
     if (block.id === selectedId) el.appendChild(renderInspector(block));
-    else if (block.type !== "figure" && block.type !== "graph") {
-      const summary = docEl.createElement("p");
-      summary.className = "im-doc-summary";
-      summary.textContent = summaryText(block);
-      el.appendChild(summary);
-    }
 
-    if (block.type === "figure" || block.type === "graph") {
-      const live = docEl.createElement("div");
-      live.className = "im-doc-live";
-      const host = docEl.createElement("div");
-      host.className = "im-doc-live-host";
-      live.appendChild(host);
-      el.appendChild(live);
-      mountLive(block, host);
-    }
+    const live = docEl.createElement("div");
+    live.className = "im-doc-live";
+    const host = docEl.createElement("div");
+    host.className = "im-doc-live-host";
+    live.appendChild(host);
+    el.appendChild(live);
+    mountLive(block, host);
     return el;
   }
 
@@ -661,15 +687,4 @@ function controlTitle(control) {
   if (control.kind === "toggle") return "Toggle";
   if (control.kind === "let") return "Formula";
   return "Control";
-}
-
-/**
- * @param {object} block
- */
-function summaryText(block) {
-  if (block.type === "heading" || block.type === "paragraph" || block.type === "markdown") {
-    return block.text || "";
-  }
-  if (block.type === "bullets") return (block.items || []).join("\n");
-  return "";
 }

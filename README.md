@@ -9,7 +9,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 ## Features
 
 - Split **editor** and **live preview**
-- Preview **block editor** for headings, controls, formulas, shapes, graphs, and the animated figure
+- **Graph editor** tab beside the source: prose renders as formatted text, and sliders, figures, and graphs stay editable blocks
 - Open / save `.md`, with a **localStorage** draft
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` / `@calc`
@@ -40,9 +40,9 @@ npx serve .
 
 > ES modules need HTTP — opening `index.html` as a `file://` URL will not work.
 
-## Build in the preview
+## Graph editor tab
 
-The preview is the editor for the whole document. Add a heading, paragraph, bullets, slider, timer, text field, toggle, formula, shape, or graph from the bar, or insert the shipped animated figure as a finished drawing. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the same canvas: drag, connect, and rename there. Each change rewrites the markdown on the left. You type labels and expressions in the fields; the fence syntax is written for you.
+The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. Each change rewrites the source. The right pane is the rendered preview.
 
 ## IVM dialect (quick reference)
 
