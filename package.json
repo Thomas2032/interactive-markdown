@@ -2,19 +2,38 @@
   "name": "interactive-markdown",
   "version": "1.0.0",
   "description": "Interactive Markdown (IVM): plain .md with live SVG sliders and timers",
-  "main": "index.js",
-  "directories": {
-    "example": "examples",
-    "test": "test"
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./styles.css": "./styles/app.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.html",
+    "src",
+    "styles",
+    "examples",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "serve .",
-    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs",
+    "prepublishOnly": "npm test",
+    "test": "node test/smoke-expr.mjs && node test/smoke-parse-ivm.mjs && node test/smoke-sanitize-svg.mjs && node test/smoke-render.mjs && node test/smoke-markdown.mjs && node test/smoke-exports.mjs",
     "test:expr": "node test/smoke-expr.mjs",
     "test:parse": "node test/smoke-parse-ivm.mjs",
     "test:sanitize": "node test/smoke-sanitize-svg.mjs",
     "test:render": "node test/smoke-render.mjs",
-    "test:markdown": "node test/smoke-markdown.mjs"
+    "test:markdown": "node test/smoke-markdown.mjs",
+    "test:exports": "node test/smoke-exports.mjs"
   },
   "repository": {
     "type": "git",
@@ -37,7 +56,6 @@
     "linkedom": "^0.18.13",
     "serve": "^14.2.6"
   },
-  "type": "module",
   "dependencies": {
     "marked": "^18.1.0"
   }

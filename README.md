@@ -16,6 +16,25 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Whitelist expression evaluator (no `eval`)
 - SVG sanitizer (strips scripts, event handlers, external hrefs)
 
+## Install
+
+```bash
+npm install interactive-markdown
+```
+
+```js
+import { marked } from "marked";
+import { renderDocument } from "interactive-markdown";
+
+const preview = document.querySelector("#preview");
+const view = renderDocument(preview, markdownSource, { marked });
+// view.destroy() tears down timers and listeners
+```
+
+Editor and widget styles ship as `interactive-markdown/styles.css`.
+
+`marked` is a dependency. Pass it as `{ marked }`, or assign a parser with a `parse` method to `globalThis.marked` before rendering.
+
 ## Quick start
 
 Requires Node.js 18+.
@@ -96,6 +115,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 ## Project layout
 
 ```
+index.js            Public package entry
 index.html          Editor shell
 src/
   app.js            UI wiring
