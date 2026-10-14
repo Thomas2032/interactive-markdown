@@ -1,8 +1,8 @@
 # Interactive Markdown (IVM)
 
-**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language.
+**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language, plus a **graph editor** stored in the same fence.
 
-Write Markdown as usual. Add an `ivm` fenced block when you want interactive SVG. The format stays AI-friendly: readable text an agent can generate like normal Markdown.
+Write Markdown as usual. Add an `ivm` fenced block when you want interactive SVG or a directed graph you can edit in the preview. The format stays AI-friendly: readable text an agent can generate like normal Markdown.
 
 License: **MIT** (see [LICENSE](LICENSE)).
 
@@ -13,6 +13,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` / `@calc`
 - SVG templates with `{{expr}}` bindings
+- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename; edits write back into the fence)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
 - SVG sanitizer (strips scripts, event handlers, external hrefs)
@@ -70,6 +71,22 @@ Fence name: **`ivm`**.
 | `@calc name = expression` | Alias of `@let` |
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is SVG markup |
+| `@graph` | Start an editable directed graph. This is the first directive in that fence |
+| `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
+| `@edge from -> to` | Directed edge between two nodes |
+
+### Graph
+
+A fence that starts with `@graph` is a node-and-edge diagram. The preview is the editor: drag a node, drag its right port onto another node, double-click a label to rename, and press Delete to remove the selection. Each committed edit replaces that fence in the source. Do not mix `@svg` or controls into the same fence.
+
+````markdown
+```ivm
+@graph
+@node start: "Start" x=40 y=48 kind=input
+@node step: "Step" x=280 y=48
+@edge start -> step
+```
+````
 
 ### Expressions (`{{…}}`)
 
@@ -107,6 +124,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/amplitude.md`](examples/amplitude.md) — wave amplitude + phase timer
 - [`examples/circular-motion.md`](examples/circular-motion.md) — point on a circle with spin animation
 - [`examples/agent-loop.md`](examples/agent-loop.md) — animated architecture figure (CSS + SMIL)
+- [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
 
 ## Project layout
 
@@ -119,6 +137,7 @@ src/
   expr.js           Safe expression evaluator
   sanitize-svg.js   SVG sanitizer
   render.js         Controls + SVG binding
+  graph-editor.js   Graph model and canvas editor
 styles/app.css
 examples/
 test/               Node smoke tests
@@ -130,7 +149,7 @@ test/               Node smoke tests
 npm test
 ```
 
-Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, and Markdown pipeline (`linkedom` is used where a DOM is required).
+Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, and graph editor (`linkedom` is used where a DOM is required).
 
 ## License
 

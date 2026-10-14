@@ -1,0 +1,188 @@
+import { parseHTML, DOMParser } from "linkedom";
+import { marked } from "marked";
+import { parseIvm, replaceIvmFence } from "../src/parse-ivm.js";
+import {
+  addEdge,
+  mountGraphEditor,
+  moveNode,
+  nextNodePosition,
+  removeSelection,
+  serializeGraph,
+} from "../src/graph-editor.js";
+import { renderDocument } from "../src/markdown.js";
+
+const { window, document } = parseHTML(
+  "<!doctype html><html><body><div id='host'></div><div id='preview'></div></body></html>"
+);
+globalThis.document = document;
+globalThis.DOMParser = DOMParser;
+globalThis.performance = { now: () => Date.now() };
+globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
+globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+let passed = 0;
+let failed = 0;
+function assert(name, cond, detail = "") {
+  if (cond) {
+    passed++;
+    console.log("  OK ", name);
+  } else {
+    failed++;
+    console.log("  FAIL", name, detail);
+  }
+}
+
+console.log("=== graph smoke ===");
+
+const sample = `
+@graph
+@node trigger: "Trigger" x=40 y=168 kind=input
+@node think: "Think" x=280 y=72
+@edge trigger -> think
+`;
+
+const parsed = parseIvm(sample);
+assert("graph parses", parsed.errors.length === 0, JSON.stringify(parsed.errors));
+assert("two nodes", parsed.graph.nodes.length === 2);
+assert("default kind action", parsed.graph.nodes[1].kind === "action");
+assert("input kind", parsed.graph.nodes[0].kind === "input");
+assert("one edge", parsed.graph.edges.length === 1 && parsed.graph.edges[0].to === "think");
+
+const dup = parseIvm(`@graph\n@node a: "A" x=1 y=2\n@node a: "B" x=3 y=4\n`);
+assert("duplicate id", dup.errors.some((e) => /duplicate id/.test(e)));
+assert("keeps first id", dup.graph.nodes.length === 1 && dup.graph.nodes[0].label === "A");
+
+const missing = parseIvm(`@graph\n@node a: "A" x=1 y=2\n@edge a -> b\n`);
+assert("missing endpoint", missing.errors.some((e) => /unknown node/.test(e)));
+assert("omits bad edge", missing.graph.edges.length === 0);
+
+const mixed = parseIvm(`@graph\n@slider amp: 0..1 = 0\n`);
+assert("slider rejected in graph", mixed.errors.some((e) => /Not allowed inside @graph/.test(e)));
+assert("no slider control", mixed.controls.length === 0);
+
+const unknown = parseIvm(`@graph\n@node a: "A" x=1 y=2 kind=nope\n`);
+assert("unknown kind errors", unknown.errors.some((e) => /unknown kind/.test(e)));
+assert("unknown kind falls back", unknown.graph.nodes[0].kind === "action");
+
+const quoted = parseIvm(`@graph\n@node a: "say \\"hi\\"" x=8 y=16\n`);
+assert("escaped label", quoted.errors.length === 0 && quoted.graph.nodes[0].label === 'say "hi"');
+
+const round = {
+  nodes: [
+    { id: "a", label: 'say "hi"', x: 8, y: 16, kind: "action" },
+    { id: "b", label: "Out", x: 40, y: 16, kind: "output" },
+  ],
+  edges: [{ from: "a", to: "b" }],
+};
+const again = parseIvm(serializeGraph(round));
+assert("serialize roundtrip", again.errors.length === 0, JSON.stringify(again.errors));
+assert("roundtrip label", again.graph.nodes[0].label === 'say "hi"');
+assert("action omitted", !serializeGraph(round).includes("kind=action"));
+assert("output kept", serializeGraph(round).includes("kind=output"));
+
+const moved = moveNode(
+  { nodes: [{ id: "a", label: "A", x: 0, y: 0, kind: "action" }], edges: [] },
+  "a",
+  15,
+  17
+);
+assert("snap 8px", moved.nodes[0].x === 16 && moved.nodes[0].y === 16);
+const slot = nextNodePosition([
+  { id: "a", label: "A", x: 32, y: 32, kind: "action" },
+  { id: "b", label: "B", x: 240, y: 32, kind: "action" },
+]);
+assert("next slot skips occupied", slot.x === 448 && slot.y === 32, JSON.stringify(slot));
+
+const base = {
+  nodes: [
+    { id: "trigger", label: "Trigger", x: 0, y: 0, kind: "input" },
+    { id: "think", label: "Think", x: 80, y: 0, kind: "action" },
+  ],
+  edges: [],
+};
+const first = addEdge(base, "trigger", "think");
+assert("edge added", first.ok && first.model.edges.length === 1);
+const dupEdge = addEdge(first.model, "trigger", "think");
+assert("duplicate edge rejected", !dupEdge.ok && dupEdge.reason === "duplicate");
+assert("duplicate leaves model", dupEdge.model.edges.length === 1);
+const reverse = addEdge(first.model, "think", "trigger");
+assert("reverse edge ok", reverse.ok && reverse.model.edges.length === 2);
+const self = addEdge(base, "trigger", "trigger");
+assert("self edge rejected", !self.ok && self.reason === "self");
+
+const removed = removeSelection(first.model, { type: "node", id: "trigger" });
+assert("delete node drops edges", removed.nodes.length === 1 && removed.edges.length === 0);
+
+const host = document.getElementById("host");
+const mounted = mountGraphEditor(host, {
+  nodes: [
+    { id: "a", label: "Alpha", x: 32, y: 32, kind: "action" },
+    { id: "b", label: "Beta", x: 240, y: 32, kind: "decision" },
+  ],
+  edges: [{ from: "a", to: "b" }],
+});
+assert("dom nodes", host.querySelectorAll(".im-graph-node").length === 2);
+assert("decision diamond", !!host.querySelector(".im-graph-diamond"));
+assert("visible edge", !!host.querySelector(".im-graph-edge[marker-end]"));
+assert("delete starts disabled", host.querySelector("[data-action=delete]").disabled === true);
+
+host.querySelector(".im-graph-node").dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+assert("delete enables", host.querySelector("[data-action=delete]").disabled === false);
+const label = host.querySelector(".im-graph-label");
+label.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+label.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+assert("double press opens rename", !!host.querySelector(".im-graph-rename"));
+
+const emptyHost = document.createElement("div");
+document.body.appendChild(emptyHost);
+let added = "";
+const emptyMount = mountGraphEditor(emptyHost, { nodes: [], edges: [] }, {
+  onChange(model) {
+    added = serializeGraph(model);
+  },
+});
+assert("empty copy", emptyHost.querySelector(".im-graph-empty")?.textContent.includes("empty"));
+emptyHost.querySelector("[data-action=add]").dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("add writes n1", added.includes('@node n1: "Node" x=32 y=32'), added);
+assert("add paints node", emptyHost.querySelectorAll(".im-graph-node").length === 1);
+emptyMount.destroy();
+assert("destroy clears", emptyHost.innerHTML === "");
+mounted.destroy();
+
+const preview = document.getElementById("preview");
+const src = `# Flow
+
+\`\`\`ivm
+@graph
+@node a: "A" x=8 y=8
+\`\`\`
+
+\`\`\`ivm
+@slider r: 1..5 = 2
+@svg
+<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><circle r="{{r}}"/></svg>
+\`\`\`
+`;
+let change = null;
+const docMount = renderDocument(preview, src, {
+  marked,
+  onGraphChange(index, body) {
+    change = { index, body };
+  },
+});
+assert("preview graph", preview.querySelectorAll(".im-graph-node").length === 1);
+assert("slider still mounts", !!preview.querySelector("input[type=range]"));
+preview.querySelector("[data-action=add]").dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("callback index 0", change && change.index === 0, JSON.stringify(change));
+assert("callback body", change && change.body.includes("@node n1:"), change && change.body);
+docMount.destroy();
+
+const replaced = replaceIvmFence(src, 0, '@graph\n@node z: "Z" x=8 y=8 kind=input\n');
+assert("replaced first fence", replaced.includes('@node z: "Z"'));
+assert("second fence kept", replaced.includes("@slider r:"));
+const replacedSecond = replaceIvmFence(src, 1, "@slider r: 1..9 = 3\n@svg\n<svg/>\n");
+assert("second fence replaced", replacedSecond.includes("1..9"));
+assert("first fence kept", replacedSecond.includes('@node a: "A"'));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

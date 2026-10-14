@@ -3,6 +3,7 @@
  */
 
 import { renderDocument } from "./markdown.js";
+import { replaceIvmFence } from "./parse-ivm.js";
 
 const STORAGE_KEY = "interactive-markdown-draft-v1";
 
@@ -30,7 +31,18 @@ function renderNow() {
     currentMount = null;
   }
   try {
-    currentMount = renderDocument(preview, editor.value);
+    currentMount = renderDocument(preview, editor.value, {
+      onGraphChange(fenceIndex, body) {
+        editor.value = replaceIvmFence(editor.value, fenceIndex, body);
+        dirty = true;
+        try {
+          localStorage.setItem(STORAGE_KEY, editor.value);
+        } catch (_) {
+          /* ignore quota */
+        }
+        setStatus("Graph updated");
+      },
+    });
     setStatus(dirty ? "Edited · preview updated" : "Preview updated");
   } catch (err) {
     preview.innerHTML = `<div class="im-errors">${escapeHtml(err.message || String(err))}</div>`;
@@ -113,6 +125,7 @@ Use an \`\`\`ivm\`\`\` fence for sliders, timers, and live SVG.
 - \`@timer name: min..max = default speed=N loop\`
 - \`@let name = expression\` (or \`@calc\`)
 - \`@svg\` then SVG with \`{{expr}}\` placeholders
+- \`@graph\` with \`@node\` and \`@edge\` for a visual graph editor
 
 Open a \`.md\` file, or save your draft from the toolbar.
 `;

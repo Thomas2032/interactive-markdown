@@ -23,7 +23,7 @@ function resolveMarked(override) {
  * Render full Interactive Markdown into a preview element.
  * @param {HTMLElement} previewEl
  * @param {string} source
- * @param {{ marked?: { parse: (md: string) => string } }} [options]
+ * @param {{ marked?: { parse: (md: string) => string }, onGraphChange?: (fenceIndex: number, body: string) => void }} [options]
  * @returns {{ destroy: () => void }}
  */
 export function renderDocument(previewEl, source, options = {}) {
@@ -40,6 +40,7 @@ export function renderDocument(previewEl, source, options = {}) {
     marked.setOptions({ gfm: true, breaks: false });
   }
 
+  let ivmIndex = 0;
   for (const seg of segments) {
     if (seg.type === "text") {
       if (!seg.content.trim()) continue;
@@ -48,10 +49,17 @@ export function renderDocument(previewEl, source, options = {}) {
       wrap.innerHTML = marked.parse(seg.content);
       previewEl.appendChild(wrap);
     } else if (seg.type === "ivm") {
+      const fenceIndex = ivmIndex++;
       const host = doc.createElement("div");
       host.className = "im-ivm-host";
       previewEl.appendChild(host);
-      mounts.push(mountIvm(host, seg.content));
+      mounts.push(
+        mountIvm(host, seg.content, {
+          onGraphChange(body) {
+            options.onGraphChange?.(fenceIndex, body);
+          },
+        })
+      );
     }
   }
 

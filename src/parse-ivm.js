@@ -12,6 +12,9 @@
  *   @calc   name = expression   (alias of @let)
  *   @svg
  *   <svg>...</svg>   (remainder of fence; use {{expr}} in attrs/text)
+ *   @graph
+ *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
+ *   @edge from -> to
  */
 
 /**
@@ -27,13 +30,43 @@
  *   label?: string,
  *   expression?: string,
  * }} Control
+ * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
+ * @typedef {{ from: string, to: string }} GraphEdge
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[] }} GraphModel
  * @typedef {{
  *   namespace: string|null,
  *   controls: Control[],
  *   templateSvg: string|null,
+ *   graph: GraphModel|null,
  *   errors: string[],
  * }} IvmBlock
  */
+
+const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
+
+/**
+ * Read a leading "quoted" or 'quoted' string. Supports backslash escapes.
+ * @param {string} s
+ * @returns {{ value: string, rest: string } | null}
+ */
+function parseQuotedPrefix(s) {
+  const str = String(s).trimStart();
+  const quote = str[0];
+  if (quote !== '"' && quote !== "'") return null;
+  let value = "";
+  let i = 1;
+  while (i < str.length) {
+    if (str[i] === "\\" && i + 1 < str.length) {
+      value += str[i + 1];
+      i += 2;
+      continue;
+    }
+    if (str[i] === quote) return { value, rest: str.slice(i + 1).trim() };
+    value += str[i];
+    i++;
+  }
+  return null;
+}
 
 function unquote(s) {
   if (s == null) return s;
@@ -81,6 +114,8 @@ export function parseIvm(body) {
   const controls = [];
   let namespace = null;
   let templateSvg = null;
+  /** @type {GraphModel | null} */
+  let graph = null;
 
   const lines = String(body).replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -89,6 +124,99 @@ export function parseIvm(body) {
     const line = lines[i].trim();
 
     if (!line || line.startsWith("#")) {
+      i++;
+      continue;
+    }
+
+    // @graph — following @node / @edge lines are an editable graph
+    if (/^@graph$/i.test(line)) {
+      if (graph) errors.push("Duplicate @graph");
+      else graph = { nodes: [], edges: [] };
+      i++;
+      continue;
+    }
+    if (/^@graph\b/i.test(line)) {
+      errors.push("@graph takes no arguments");
+      i++;
+      continue;
+    }
+
+    // @node id: "Label" x=N y=N kind=action
+    {
+      const m = line.match(/^@node\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]+)$/i);
+      if (m) {
+        const id = m[1];
+        if (!graph) {
+          errors.push(`@node ${id}: only valid after @graph`);
+          i++;
+          continue;
+        }
+        const quoted = parseQuotedPrefix(m[2]);
+        if (!quoted) {
+          errors.push(`@node ${id}: expected "Label" x=N y=N`);
+          i++;
+          continue;
+        }
+        if (graph.nodes.some((n) => n.id === id)) {
+          errors.push(`@node ${id}: duplicate id`);
+          i++;
+          continue;
+        }
+        const flags = parseFlags(quoted.rest);
+        const x = flags.x !== undefined ? Number(flags.x) : 48;
+        const y = flags.y !== undefined ? Number(flags.y) : 48;
+        const rawKind = flags.kind !== undefined ? String(flags.kind).toLowerCase() : "action";
+        if (!NODE_KINDS.has(rawKind)) {
+          errors.push(`@node ${id}: unknown kind ${flags.kind}`);
+        }
+        graph.nodes.push({
+          id,
+          label: quoted.value,
+          x: Number.isFinite(x) ? x : 48,
+          y: Number.isFinite(y) ? y : 48,
+          kind: NODE_KINDS.has(rawKind) ? rawKind : "action",
+        });
+        i++;
+        continue;
+      }
+    }
+
+    // @edge from -> to
+    {
+      const m = line.match(
+        /^@edge\s+([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/i
+      );
+      if (m) {
+        const from = m[1];
+        const to = m[2];
+        if (!graph) {
+          errors.push(`@edge ${from} -> ${to}: only valid after @graph`);
+          i++;
+          continue;
+        }
+        if (from === to) {
+          errors.push(`@edge ${from} -> ${to}: a node cannot connect to itself`);
+          i++;
+          continue;
+        }
+        if (!graph.nodes.some((n) => n.id === from) || !graph.nodes.some((n) => n.id === to)) {
+          errors.push(`@edge ${from} -> ${to}: unknown node`);
+          i++;
+          continue;
+        }
+        if (graph.edges.some((e) => e.from === from && e.to === to)) {
+          errors.push(`@edge ${from} -> ${to}: duplicate edge`);
+          i++;
+          continue;
+        }
+        graph.edges.push({ from, to });
+        i++;
+        continue;
+      }
+    }
+
+    if (graph) {
+      errors.push(`Not allowed inside @graph: ${line}`);
       i++;
       continue;
     }
@@ -226,7 +354,25 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, templateSvg, errors };
+  return { namespace, controls, templateSvg, graph, errors };
+}
+
+/**
+ * Replace the Nth ```ivm fence (0-based) with a new interior.
+ * Indexes are computed from the current source, so earlier edits stay consistent.
+ * @param {string} source
+ * @param {number} fenceIndex
+ * @param {string} body
+ * @returns {string}
+ */
+export function replaceIvmFence(source, fenceIndex, body) {
+  const src = String(source).replace(/\r\n/g, "\n");
+  const ivm = splitIvmFences(src).filter((s) => s.type === "ivm");
+  const seg = ivm[fenceIndex];
+  if (!seg) return src;
+  const interior = String(body).replace(/\s*$/, "\n");
+  const next = "```ivm\n" + interior + "```";
+  return src.slice(0, seg.start) + next + src.slice(seg.end);
 }
 
 /**
