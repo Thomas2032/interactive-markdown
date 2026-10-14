@@ -154,5 +154,36 @@ assert("keyframes scoped", /@keyframes\s+pulse/.test(animScope.innerHTML), animS
 assert("keyframes not in light dom", !/@keyframes/.test(animHost.innerHTML));
 assert("animated circle", animScope.querySelector("circle")?.getAttribute("class") === "dot");
 
+// slim @svg WxH wraps non-root markup; label falls back to name
+resetNamespaces();
+const slimHost = document.createElement("div");
+document.body.appendChild(slimHost);
+const slim = mountIvm(
+  slimHost,
+  `@slider amp: 5..55 = 28
+@let y = 40 - amp * sind(0)
+@svg 200x80
+  <circle cx="100" cy="{{y}}" r="{{amp}}" fill="#f472b6"/>`
+);
+const slimScope = svgScope(slimHost);
+assert("slim wraps svg", !!slimScope.querySelector("svg"));
+assert("slim viewBox", slimScope.querySelector("svg").getAttribute("viewBox") === "0 0 200 80");
+assert("slim r bound", slimScope.querySelector("circle").getAttribute("r") === "28");
+assert("label fallback", slimHost.querySelector(".im-label-text").textContent === "amp");
+slim.destroy();
+
+// full root <svg> with WxH left alone (no double wrap)
+resetNamespaces();
+const fullHost = document.createElement("div");
+document.body.appendChild(fullHost);
+mountIvm(
+  fullHost,
+  `@svg 100x50
+<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>`
+);
+const fullScope = svgScope(fullHost);
+assert("no double svg", fullScope.querySelectorAll("svg").length === 1);
+assert("kept author viewBox", fullScope.querySelector("svg").getAttribute("viewBox") === "0 0 100 50");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

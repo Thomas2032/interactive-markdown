@@ -2,20 +2,23 @@
  * Parse ```ivm fence body into controls + SVG template.
  * Interactive Markdown (IVM) dialect.
  *
- * Line forms:
+ * Line forms (long names are canonical; short aliases also parse):
  *   @ns name
- *   @slider name: min..max = default step=S "Label"
- *   @timer  name: min..max = default speed=N step=S loop|noloop "Label"
- *   @input  name: "default" "Label"
- *   @toggle name: true|false "Label"
- *   @let    name = expression
- *   @calc   name = expression   (alias of @let)
- *   @svg
- *   <svg>...</svg>   (remainder of fence; use {{expr}} in attrs/text)
+ *   @slider | @s  name: min..max = default [step=S] [deg|rad] ["Label"]
+ *   @timer  | @t  name: min..max = default [speed=N] [step=S] [loop|noloop] [deg|rad] ["Label"]
+ *   @input  | @i  name: "default" ["Label"]
+ *   @toggle | @b  name: true|false ["Label"]
+ *   @let    | @l  name = expression
+ *   @calc         name = expression   (alias of @let; prefer @let in docs/generators)
+ *   @svg [WxH]
+ *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
  *   @graph
  *   @animate [path=ortho|straight|curve] [quantity=N] [direction=forward|reverse] [speed=seconds]
  *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
  *   @edge from -> to [from=right|left|top|bottom] [to=left|right|top|bottom]
+ *
+ * Defaults: step=1, timer loop=true, speed=30. Omitted "Label" → UI shows name.
+ * `@svg 200x80` stores width/height so the renderer can wrap non-root markup.
  */
 
 /**
@@ -30,6 +33,7 @@
  *   loop?: boolean,
  *   label?: string,
  *   expression?: string,
+ *   units?: 'deg'|'rad',
  * }} Control
  * @typedef {"left"|"right"|"top"|"bottom"} GraphSide
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
@@ -40,12 +44,28 @@
  *   namespace: string|null,
  *   controls: Control[],
  *   templateSvg: string|null,
+ *   svgWidth: number|null,
+ *   svgHeight: number|null,
  *   graph: GraphModel|null,
  *   errors: string[],
  * }} IvmBlock
  */
 
 const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
+
+const KIND_ALIASES = Object.freeze({
+  s: "slider",
+  slider: "slider",
+  t: "timer",
+  timer: "timer",
+  i: "input",
+  input: "input",
+  b: "toggle",
+  toggle: "toggle",
+  l: "let",
+  let: "let",
+  calc: "let",
+});
 
 /**
  * @param {string} line
@@ -135,6 +155,8 @@ function parseFlags(rest) {
   }
   if (/\bnoloop\b/i.test(rest)) out.loop = "false";
   else if (/\bloop\b/i.test(rest) && out.loop === undefined) out.loop = "true";
+  if (/\bdeg\b/i.test(rest)) out.units = "deg";
+  else if (/\brad\b/i.test(rest)) out.units = "rad";
   return out;
 }
 
@@ -156,6 +178,10 @@ export function parseIvm(body) {
   const controls = [];
   let namespace = null;
   let templateSvg = null;
+  /** @type {number|null} */
+  let svgWidth = null;
+  /** @type {number|null} */
+  let svgHeight = null;
   /** @type {GraphModel | null} */
   let graph = null;
 
@@ -293,11 +319,25 @@ export function parseIvm(body) {
       continue;
     }
 
-    // @svg — remainder of fence is SVG markup
+    // @svg [WxH] — remainder of fence is SVG markup
     if (/^@svg\b/i.test(line)) {
-      const after = line.replace(/^@svg\b/i, "");
+      const after = line.replace(/^@svg\b/i, "").trim();
+      const size = after.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*$/);
+      if (size) {
+        svgWidth = Number(size[1]);
+        svgHeight = Number(size[2]);
+      } else if (after) {
+        // Inline markup on the same line (legacy): treat as template start
+        const parts = [after];
+        i++;
+        while (i < lines.length) {
+          parts.push(lines[i]);
+          i++;
+        }
+        templateSvg = parts.join("\n").replace(/^\n+/, "").replace(/\n+$/, "\n");
+        break;
+      }
       const parts = [];
-      if (after.trim()) parts.push(after.trim());
       i++;
       while (i < lines.length) {
         parts.push(lines[i]);
@@ -317,27 +357,28 @@ export function parseIvm(body) {
       }
     }
 
-    // @let / @calc name = expression
+    // @let / @l / @calc name = expression
     {
-      const m = line.match(/^@(?:let|calc)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/i);
+      const m = line.match(/^@(let|l|calc)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/i);
       if (m) {
-        controls.push({ kind: "let", name: m[1], expression: m[2].trim() });
+        controls.push({ kind: "let", name: m[2], expression: m[3].trim() });
         i++;
         continue;
       }
     }
 
-    // @slider name: min..max = default step=S "Label"
+    // @slider|@s|@timer|@t name: min..max = default …
     {
-      const m = line.match(/^@slider\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i);
+      const m = line.match(/^@(slider|s|timer|t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i);
       if (m) {
-        const name = m[1];
-        const [rest, label] = takeLabel(m[2]);
+        const kind = KIND_ALIASES[m[1].toLowerCase()];
+        const name = m[2];
+        const [rest, label] = takeLabel(m[3]);
         const rm = rest.match(
           /^(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*(?:=\s*(-?[0-9]*\.?[0-9]+))?\s*(.*)$/
         );
         if (!rm) {
-          errors.push(`@slider ${name}: expected min..max [= default]`);
+          errors.push(`@${kind} ${name}: expected min..max [= default]`);
           i++;
           continue;
         }
@@ -345,77 +386,57 @@ export function parseIvm(body) {
         const def = rm[3] !== undefined ? Number(rm[3]) : range[0];
         const flags = parseFlags(rm[4] || "");
         const step = flags.step !== undefined ? Number(flags.step) : 1;
-        controls.push({
-          kind: "slider",
+        /** @type {Control} */
+        const ctrl = {
+          kind,
           name,
           range,
           step: Number.isFinite(step) ? step : 1,
           default: Number.isFinite(def) ? def : range[0],
-          label: label || flags.label,
-        });
-        i++;
-        continue;
-      }
-    }
-
-    // @timer name: min..max = default speed=N step=S loop|noloop "Label"
-    {
-      const m = line.match(/^@timer\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i);
-      if (m) {
-        const name = m[1];
-        const [rest, label] = takeLabel(m[2]);
-        const rm = rest.match(
-          /^(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*(?:=\s*(-?[0-9]*\.?[0-9]+))?\s*(.*)$/
-        );
-        if (!rm) {
-          errors.push(`@timer ${name}: expected min..max [= default]`);
-          i++;
-          continue;
+          label: label || flags.label || undefined,
+        };
+        if (flags.units === "deg" || flags.units === "rad") {
+          ctrl.units = /** @type {'deg'|'rad'} */ (flags.units);
         }
-        const range = /** @type {[number, number]} */ ([Number(rm[1]), Number(rm[2])]);
-        const def = rm[3] !== undefined ? Number(rm[3]) : range[0];
-        const flags = parseFlags(rm[4] || "");
-        const step = flags.step !== undefined ? Number(flags.step) : 1;
-        const speed = flags.speed !== undefined ? Number(flags.speed) : 30;
-        const loop = flags.loop === undefined ? true : parseBool(flags.loop, true);
+        if (kind === "timer") {
+          const speed = flags.speed !== undefined ? Number(flags.speed) : 30;
+          ctrl.speed = Number.isFinite(speed) && speed > 0 ? speed : 30;
+          ctrl.loop = flags.loop === undefined ? true : parseBool(flags.loop, true);
+        }
+        controls.push(ctrl);
+        i++;
+        continue;
+      }
+    }
+
+    // @input|@i name: "default" "Label"
+    {
+      const m = line.match(/^@(input|i)\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+)$/i);
+      if (m) {
+        const name = m[2];
+        const [rest, label] = takeLabel(m[3]);
         controls.push({
-          kind: "timer",
+          kind: "input",
           name,
-          range,
-          step: Number.isFinite(step) ? step : 1,
-          default: Number.isFinite(def) ? def : range[0],
-          speed: Number.isFinite(speed) && speed > 0 ? speed : 30,
-          loop,
-          label: label || flags.label,
+          default: unquote(rest) ?? "",
+          label: label || undefined,
         });
         i++;
         continue;
       }
     }
 
-    // @input name: "default" "Label"
+    // @toggle|@b name: true|false "Label"
     {
-      const m = line.match(/^@input\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+)$/i);
+      const m = line.match(/^@(toggle|b)\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+)$/i);
       if (m) {
-        const name = m[1];
-        const [rest, label] = takeLabel(m[2]);
-        controls.push({ kind: "input", name, default: unquote(rest) ?? "", label });
-        i++;
-        continue;
-      }
-    }
-
-    // @toggle name: true|false "Label"
-    {
-      const m = line.match(/^@toggle\s+([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+)$/i);
-      if (m) {
-        const name = m[1];
-        const [rest, label] = takeLabel(m[2]);
+        const name = m[2];
+        const [rest, label] = takeLabel(m[3]);
         controls.push({
           kind: "toggle",
           name,
           default: parseBool(rest, false),
-          label,
+          label: label || undefined,
         });
         i++;
         continue;
@@ -426,7 +447,7 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, templateSvg, graph, errors };
+  return { namespace, controls, templateSvg, svgWidth, svgHeight, graph, errors };
 }
 
 /**

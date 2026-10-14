@@ -45,10 +45,43 @@ assert("let", p.controls[4].kind === "let" && p.controls[4].expression === "amp 
 assert("calc->let", p.controls[5].kind === "let" && p.controls[5].name === "b");
 assert("svg present", typeof p.templateSvg === "string" && p.templateSvg.includes("<svg"));
 assert("svg has {{amp}}", p.templateSvg.includes("{{amp}}"));
+assert("full svg no size", p.svgWidth == null && p.svgHeight == null);
 
 // noloop
 const t2 = parseIvm(`@timer x: 0..10 = 0 noloop\n@svg\n<svg/>\n`);
 assert("noloop", t2.controls[0].loop === false);
+
+// defaults when flags omitted
+const defs = parseIvm(`@slider n: 0..10 = 3\n@timer u: 0..5 = 0\n@svg\n<svg/>\n`);
+assert("default step", defs.controls[0].step === 1);
+assert("label undefined", defs.controls[0].label === undefined);
+assert("timer default loop", defs.controls[1].loop === true);
+assert("timer default speed", defs.controls[1].speed === 30);
+
+// short aliases
+const aliases = parseIvm(`
+@s amp: 5..55 = 28
+@t t: 0..100 = 0 speed=25
+@i title: "Hi"
+@b on: false
+@l y = amp * 2
+@svg 200x80
+  <circle r="{{amp}}"/>
+`);
+assert("alias errors", aliases.errors.length === 0, JSON.stringify(aliases.errors));
+assert("alias @s", aliases.controls[0].kind === "slider" && aliases.controls[0].name === "amp");
+assert("alias @t", aliases.controls[1].kind === "timer");
+assert("alias @i", aliases.controls[2].kind === "input");
+assert("alias @b", aliases.controls[3].kind === "toggle");
+assert("alias @l", aliases.controls[4].kind === "let" && aliases.controls[4].name === "y");
+assert("svg WxH width", aliases.svgWidth === 200);
+assert("svg WxH height", aliases.svgHeight === 80);
+assert("slim svg body", aliases.templateSvg.includes("<circle") && !/^<svg\b/i.test(aliases.templateSvg.trim()));
+
+// deg/rad flag
+const deg = parseIvm(`@timer spin: 0..360 = 0 deg speed=40\n@slider a: 0..180 = 90 rad\n@svg\n<svg/>\n`);
+assert("deg units", deg.controls[0].units === "deg");
+assert("rad units", deg.controls[1].units === "rad");
 
 // bad slider
 const bad = parseIvm(`@slider z: nope\n`);

@@ -38,6 +38,13 @@ assert("clamp", evaluate("clamp(5,0,3)") === 3);
 assert("lerp", evaluate("lerp(0,10,0.5)") === 5);
 assert("min/max", evaluate("min(3,1,4)") === 1 && evaluate("max(3,1,4)") === 4);
 assert("deg/rad", Math.abs(evaluate("deg(rad(90))") - 90) < 1e-10);
+assert("sind(0)", evaluate("sind(0)") === 0);
+assert("cosd(0)", Math.abs(evaluate("cosd(0)") - 1) < 1e-12);
+assert("sind(90)", Math.abs(evaluate("sind(90)") - 1) < 1e-12);
+assert("tand(45)", Math.abs(evaluate("tand(45)") - 1) < 1e-12);
+assert("asind(1)", Math.abs(evaluate("asind(1)") - 90) < 1e-10);
+assert("acosd(1)", Math.abs(evaluate("acosd(1)") - 0) < 1e-10);
+assert("atand(1)", Math.abs(evaluate("atand(1)") - 45) < 1e-10);
 
 // env vars
 assert("env", evaluate("amp + 1", { amp: 30 }) === 31);

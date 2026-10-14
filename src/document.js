@@ -407,18 +407,46 @@ function blockFromIvm(body) {
       model: copyGraphModel(parsed.graph),
     };
   }
-  const template = parsed.templateSvg;
+  const raw = parsed.templateSvg;
+  const template = wrapSlimSvg(raw, parsed.svgWidth, parsed.svgHeight);
   const shapes = template ? tryParseShapes(template) : [];
   const custom = shapes == null;
+  const viewBox =
+    (template && readViewBox(template)) ||
+    (parsed.svgWidth != null && parsed.svgHeight != null
+      ? `0 0 ${parsed.svgWidth} ${parsed.svgHeight}`
+      : "0 0 200 120");
   return {
     id: nid(),
     type: "figure",
     namespace: parsed.namespace,
     controls: parsed.controls.map(cloneControl),
-    viewBox: (template && readViewBox(template)) || "0 0 200 120",
+    viewBox,
     shapes: custom ? null : shapes,
-    customSvg: custom ? template : null,
+    customSvg: custom ? raw : null,
   };
+}
+
+/**
+ * If @svg WxH left non-root markup, wrap it so shape parsing sees an <svg> root.
+ * @param {string|null} markup
+ * @param {number|null} width
+ * @param {number|null} height
+ */
+function wrapSlimSvg(markup, width, height) {
+  if (markup == null) return null;
+  const src = String(markup);
+  const trimmed = src.trim();
+  if (!trimmed) return src;
+  if (/^<svg\b/i.test(trimmed)) return src;
+  if (width == null || height == null || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return src;
+  }
+  return (
+    `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">\n` +
+    src.replace(/^\n+/, "").replace(/\n+$/, "\n") +
+    `</svg>`
+  );
 }
 
 /**
