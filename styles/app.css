@@ -626,3 +626,148 @@ body {
   font-size: 0.86rem;
   text-align: center;
 }
+
+.im-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 52rem;
+}
+
+.im-doc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.im-doc-bar button,
+.im-doc-bar select,
+.im-doc-block-bar button,
+.im-doc-sub button,
+.im-doc-field input,
+.im-doc-field textarea,
+.im-doc-field select {
+  font: inherit;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.35rem 0.65rem;
+}
+
+.im-doc-bar button,
+.im-doc-block-bar button,
+.im-doc-sub button {
+  cursor: pointer;
+}
+
+.im-doc-bar button:hover,
+.im-doc-block-bar button:hover,
+.im-doc-sub button:hover {
+  border-color: var(--accent);
+}
+
+.im-doc-block-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.im-doc-help,
+.im-doc-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.im-doc-empty[hidden] {
+  display: none;
+}
+
+.im-doc-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.im-doc-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.im-doc-block.is-selected {
+  border-color: var(--accent);
+}
+
+.im-doc-block-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.im-doc-kind {
+  font-weight: 600;
+}
+
+.im-doc-summary {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.92rem;
+}
+
+.im-doc-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.im-doc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.im-doc-field input,
+.im-doc-field textarea,
+.im-doc-field select {
+  width: 100%;
+}
+
+.im-doc-field input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+
+.im-doc-sub {
+  margin: 0;
+  padding: 0.55rem 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.im-doc-sub legend {
+  padding: 0 0.3rem;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.im-doc-live,
+.im-doc-live-host {
+  min-width: 0;
+  max-width: 100%;
+}

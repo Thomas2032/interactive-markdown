@@ -1,0 +1,133 @@
+import { readFileSync } from "node:fs";
+import { parseHTML, DOMParser } from "linkedom";
+import { insertFeature, parseDocument, serializeDocument } from "../src/document.js";
+import { mountDocumentEditor } from "../src/document-editor.js";
+
+const { window, document } = parseHTML(
+  "<!doctype html><html><body><div id='host'></div></body></html>"
+);
+globalThis.document = document;
+globalThis.DOMParser = DOMParser;
+globalThis.window = window;
+globalThis.performance = { now: () => Date.now() };
+globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
+globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+let passed = 0;
+let failed = 0;
+function assert(name, cond, detail = "") {
+  if (cond) {
+    passed++;
+    console.log("  OK ", name);
+  } else {
+    failed++;
+    console.log("  FAIL", name, detail);
+  }
+}
+
+function read(name) {
+  return readFileSync(new URL("../examples/" + name, import.meta.url), "utf8");
+}
+
+console.log("=== document smoke ===");
+
+const amplitude = parseDocument(read("amplitude.md"));
+const figure = amplitude.blocks.find((b) => b.type === "figure");
+assert("amplitude heading", amplitude.blocks.some((b) => b.type === "heading" && b.text === "Wave amplitude"));
+assert("amplitude figure", !!figure);
+assert("slider", figure?.controls.some((c) => c.kind === "slider" && c.name === "amp"));
+assert("timer", figure?.controls.some((c) => c.kind === "timer" && c.name === "t" && c.loop === true));
+assert(
+  "formulas",
+  figure?.controls.filter((c) => c.kind === "let").length === 2 &&
+    figure.controls.some((c) => c.kind === "let" && /sin\(/.test(c.expression))
+);
+assert("circle", figure?.shapes?.some((s) => s.type === "circle"));
+assert(
+  "bound path",
+  figure?.shapes?.some((s) => s.type === "path" && String(s.attrs.d).includes("{{round(y,2)}}"))
+);
+const amplitudeOut = serializeDocument(amplitude.blocks);
+assert("serialized slider", /@slider amp:/.test(amplitudeOut));
+assert("serialized timer", /@timer t:/.test(amplitudeOut) && /loop/.test(amplitudeOut));
+assert("serialized formula", /@let y =/.test(amplitudeOut));
+assert("serialized circle", /<circle\b/.test(amplitudeOut));
+const amplitudeAgain = parseDocument(amplitudeOut);
+const figureAgain = amplitudeAgain.blocks.find((b) => b.type === "figure");
+assert(
+  "round trip shapes",
+  figureAgain?.shapes?.some((s) => s.type === "circle") &&
+    figureAgain.shapes.some((s) => String(s.attrs.d || "").includes("{{round(y,2)}}"))
+);
+
+const graph = parseDocument(read("graph.md"));
+const graphBlock = graph.blocks.find((b) => b.type === "graph");
+assert("graph block", !!graphBlock);
+assert("five nodes", graphBlock?.model.nodes.length === 5);
+assert("four edges", graphBlock?.model.edges.length === 4);
+const graphOut = serializeDocument(graph.blocks);
+assert("graph fence", /@graph/.test(graphOut) && /@node trigger:/.test(graphOut) && /@edge act -> output/.test(graphOut));
+
+const agent = parseDocument(read("agent-loop.md"));
+const animated = agent.blocks.find((b) => b.type === "figure" && b.customSvg);
+assert("opaque figure", !!animated && animated.shapes == null);
+assert("keeps keyframes", /@keyframes/.test(animated?.customSvg || ""));
+assert("keeps animateMotion", /animateMotion/.test(animated?.customSvg || ""));
+assert("keeps filter", /feGaussianBlur/.test(animated?.customSvg || ""));
+const agentOut = serializeDocument(agent.blocks);
+assert("keyframes survive", /@keyframes/.test(agentOut));
+assert("animateMotion survives", /animateMotion/.test(agentOut));
+assert("filter survives", /feGaussianBlur/.test(agentOut));
+
+let built = insertFeature({ blocks: [] }, "slider");
+built = insertFeature(built.doc, "timer", { figureId: built.focusId });
+built = insertFeature(built.doc, "formula", { figureId: built.focusId });
+built = insertFeature(built.doc, "shape", { figureId: built.focusId, shapeType: "circle" });
+const builtOut = serializeDocument(built.doc.blocks);
+assert("new slider name", /@slider s1:/.test(builtOut));
+assert("new timer name", /@timer t1:/.test(builtOut));
+assert("new formula name", /@let y1 = 0/.test(builtOut));
+assert("new circle", /<circle\b[^>]*r="16"/.test(builtOut));
+
+const motion = parseDocument(read("circular-motion.md"));
+const motionFigure = motion.blocks.find((b) => b.type === "figure");
+assert("calc reads as formula", motionFigure?.controls.some((c) => c.kind === "let" && c.name === "a"));
+assert(
+  "text binding",
+  motionFigure?.shapes?.some((s) => s.type === "text" && String(s.attrs.text).includes("{{round(a,1)}}"))
+);
+assert("formula writes @let", /@let a =/.test(serializeDocument(motion.blocks)));
+
+const host = document.getElementById("host");
+let seen = null;
+const editor = mountDocumentEditor(host, "", {
+  onChange(markdown) {
+    seen = markdown;
+  },
+});
+assert("mount does not write", seen === null);
+const button = host.querySelector("[data-add=slider]");
+button.dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("add slider writes @slider", typeof seen === "string" && /@slider\s+s1:/.test(seen), seen);
+const label = host.querySelector('.im-doc-inspector [data-field="label"]');
+label.value = "Amplitude";
+label.dispatchEvent(new window.Event("input", { bubbles: true }));
+assert("label edit keeps the field", label.isConnected && label.value === "Amplitude");
+assert("label edit writes the source", /@slider s1:.* "Amplitude"/.test(seen), seen);
+editor.destroy();
+
+const graphHost = document.createElement("div");
+document.body.appendChild(graphHost);
+let graphSeen = null;
+mountDocumentEditor(graphHost, read("graph.md"), {
+  onChange(markdown) {
+    graphSeen = markdown;
+  },
+});
+const addNode = graphHost.querySelector('.im-graph-bar [data-action="add"]');
+addNode.dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("graph add writes a node", typeof graphSeen === "string" && /@node n1:/.test(graphSeen), graphSeen);
+assert("graph add leaves the canvas mounted", !!graphHost.querySelector(".im-graph-canvas"));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

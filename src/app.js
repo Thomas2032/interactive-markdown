@@ -2,8 +2,7 @@
  * Interactive Markdown — editor + live preview shell.
  */
 
-import { renderDocument } from "./markdown.js";
-import { replaceIvmFence } from "./parse-ivm.js";
+import { mountDocumentEditor } from "./document-editor.js";
 
 const STORAGE_KEY = "interactive-markdown-draft-v1";
 
@@ -31,16 +30,19 @@ function renderNow() {
     currentMount = null;
   }
   try {
-    currentMount = renderDocument(preview, editor.value, {
-      onGraphChange(fenceIndex, body) {
-        editor.value = replaceIvmFence(editor.value, fenceIndex, body);
+    currentMount = mountDocumentEditor(preview, editor.value, {
+      onChange(markdown) {
+        editor.value = markdown;
         dirty = true;
         try {
           localStorage.setItem(STORAGE_KEY, editor.value);
         } catch (_) {
           /* ignore quota */
         }
-        setStatus("Graph updated");
+        setStatus("Document updated");
+      },
+      onStatus(msg) {
+        setStatus(msg);
       },
     });
     setStatus(dirty ? "Edited · preview updated" : "Preview updated");

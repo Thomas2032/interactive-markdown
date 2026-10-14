@@ -9,6 +9,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 ## Features
 
 - Split **editor** and **live preview**
+- Preview **block editor** for headings, controls, formulas, shapes, graphs, and the animated figure
 - Open / save `.md`, with a **localStorage** draft
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` / `@calc`
@@ -38,6 +39,10 @@ npx serve .
 ```
 
 > ES modules need HTTP — opening `index.html` as a `file://` URL will not work.
+
+## Build in the preview
+
+The preview is the editor for the whole document. Add a heading, paragraph, bullets, slider, timer, text field, toggle, formula, shape, or graph from the bar, or insert the shipped animated figure as a finished drawing. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the same canvas: drag, connect, and rename there. Each change rewrites the markdown on the left. You type labels and expressions in the fields; the fence syntax is written for you.
 
 ## IVM dialect (quick reference)
 
@@ -132,6 +137,8 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 index.html          Editor shell
 src/
   app.js            UI wiring
+  document.js       Block model (parse and serialize)
+  document-editor.js  Preview block editor
   markdown.js       MD + IVM pipeline
   parse-ivm.js      Fence / control parser
   expr.js           Safe expression evaluator
@@ -149,7 +156,7 @@ test/               Node smoke tests
 npm test
 ```
 
-Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, and graph editor (`linkedom` is used where a DOM is required).
+Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, and preview document builder (`linkedom` is used where a DOM is required).
 
 ## License
 
