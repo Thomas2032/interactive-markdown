@@ -41,6 +41,12 @@ const FUNCTIONS = Object.freeze({
   lerp: (a, b, t) => a + (b - a) * t,
   deg: (r) => (r * 180) / Math.PI,
   rad: (d) => (d * Math.PI) / 180,
+  sind: (d) => Math.sin((d * Math.PI) / 180),
+  cosd: (d) => Math.cos((d * Math.PI) / 180),
+  tand: (d) => Math.tan((d * Math.PI) / 180),
+  asind: (x) => (Math.asin(x) * 180) / Math.PI,
+  acosd: (x) => (Math.acos(x) * 180) / Math.PI,
+  atand: (x) => (Math.atan(x) * 180) / Math.PI,
 });
 
 function tokenize(input) {

@@ -41,12 +41,12 @@ assert("timer", figure?.controls.some((c) => c.kind === "timer" && c.name === "t
 assert(
   "formulas",
   figure?.controls.filter((c) => c.kind === "let").length === 2 &&
-    figure.controls.some((c) => c.kind === "let" && /sin\(/.test(c.expression))
+    figure.controls.some((c) => c.kind === "let" && /sind\(/.test(c.expression))
 );
 assert("circle", figure?.shapes?.some((s) => s.type === "circle"));
 assert(
   "bound path",
-  figure?.shapes?.some((s) => s.type === "path" && String(s.attrs.d).includes("{{round(y,2)}}"))
+  figure?.shapes?.some((s) => s.type === "path" && String(s.attrs.d).includes("{{y}}"))
 );
 const amplitudeOut = serializeDocument(amplitude.blocks);
 assert("serialized slider", /@slider amp:/.test(amplitudeOut));
@@ -58,7 +58,7 @@ const figureAgain = amplitudeAgain.blocks.find((b) => b.type === "figure");
 assert(
   "round trip shapes",
   figureAgain?.shapes?.some((s) => s.type === "circle") &&
-    figureAgain.shapes.some((s) => String(s.attrs.d || "").includes("{{round(y,2)}}"))
+    figureAgain.shapes.some((s) => String(s.attrs.d || "").includes("{{y}}"))
 );
 
 const graph = parseDocument(read("graph.md"));

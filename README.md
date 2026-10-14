@@ -12,8 +12,9 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - **Graph editor** tab beside the source: prose renders as formatted text, and sliders, figures, and graphs stay editable blocks
 - Open / save `.md`, with a **localStorage** draft
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
-- Derived values with `@let` / `@calc`
+- Derived values with `@let` (agents should emit `@let`, not `@calc`)
 - SVG templates with `{{expr}}` bindings
+- Slim `@svg WxH` wrapper for compact markup
 - Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename; edits write back into the fence)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
@@ -46,21 +47,18 @@ The left pane has two tabs. **Source** is the markdown. **Graph editor** shows t
 
 ## IVM dialect (quick reference)
 
-Fence name: **`ivm`**.
+Fence name: **`ivm`**. Long control names are canonical; short aliases are accepted for compact AI generation.
+
+### Canonical exemplar
 
 ````markdown
 ```ivm
-@ns optionalSharedName
-@slider amp: 5..60 = 30 step=1 "Amplitude"
-@timer t: 0..100 = 0 speed=20 loop "Phase"
-@input title: "Hello" "Title"
-@toggle show: true "Show"
-@let y = 40 - amp * sin(t * pi / 50)
-@calc a = amp / 2
-@svg
-<svg viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="100" cy="{{round(y, 2)}}" r="{{amp}}" fill="#38bdf8"/>
-</svg>
+@slider amp: 5..55 = 28
+@timer t: 0..100 = 0 speed=25
+@let y = 40 - amp * sind(t * 3.6)
+@svg 200x80
+  <rect width="200" height="80" fill="#0f172a"/>
+  <path d="M10 40 Q55 {{y}} 100 40 T190 40" fill="none" stroke="#38bdf8" stroke-width="3"/>
 ```
 ````
 
@@ -68,18 +66,38 @@ Fence name: **`ivm`**.
 
 | Line | Meaning |
 |------|---------|
-| `@slider name: min..max = default step=S "Label"` | Range input |
-| `@timer name: min..max = default speed=N loop` | Animated value + Play/Pause (`noloop` to stop at end) |
-| `@input name: "default" "Label"` | Text field |
-| `@toggle name: true\|false "Label"` | Checkbox |
-| `@let name = expression` | Computed value |
-| `@calc name = expression` | Alias of `@let` |
+| `@slider name: min..max = default [step=S] [deg\|rad] ["Label"]` | Range input (`@s` alias) |
+| `@timer name: min..max = default [speed=N] [step=S] [loop\|noloop] [deg\|rad] ["Label"]` | Animated value + Play/Pause (`@t` alias) |
+| `@input name: "default" ["Label"]` | Text field (`@i` alias) |
+| `@toggle name: true\|false ["Label"]` | Checkbox (`@b` alias) |
+| `@let name = expression` | Computed value (`@l` alias) |
+| `@calc name = expression` | Alias of `@let` (compat only; prefer `@let`) |
 | `@ns name` | Share variable state across IVM blocks with the same name |
-| `@svg` | Everything after this line is SVG markup |
+| `@svg` | Everything after this line is full SVG markup |
+| `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
 | `@graph` | Start an editable directed graph. This is the first directive in that fence |
 | `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
 | `@edge from -> to` | Directed edge. Add `from=top\|right\|bottom\|left` and `to=top\|right\|bottom\|left` to choose the sides. Defaults are `from=right` and `to=left` |
 | `@animate` | Play marching dashes and traveling dots on the graph canvas. Options: `path=ortho\|straight\|curve`, `quantity=N` (1–12), `direction=forward\|reverse`, `speed=seconds` |
+
+### Defaults (omit when unchanged)
+
+- `step` defaults to **1**
+- timer `loop` defaults to **true** (write `noloop` only when needed)
+- timer `speed` defaults to **30**
+- if `"Label"` is omitted, the UI shows the variable **name**
+
+### Short aliases (AI-compact)
+
+| Short | Long |
+|-------|------|
+| `@s` | `@slider` |
+| `@t` | `@timer` |
+| `@i` | `@input` |
+| `@b` | `@toggle` |
+| `@l` | `@let` |
+
+Humans and docs should use the long forms. Generators may emit short aliases; both parse.
 
 ### Graph
 
@@ -96,15 +114,17 @@ A fence that starts with `@graph` is a node-and-edge diagram. The preview is the
 
 ### Expressions (`{{…}}`)
 
-Placeholders use **double braces**: `{{expr}}`.
+Placeholders use **double braces** only: `{{expr}}`.
 
 Allowed operators include `+ - * / % ^ **`, comparisons, `&& || !`, and ternary `? :`.
 
-Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `deg`, `rad`.
+Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sind`, `cosd`, `tand`, `asind`, `acosd`, `atand`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `deg`, `rad`.
 
 Constants: `pi`, `e`, `tau`.
 
-Angles for trig functions are in **radians** (use `deg` / `rad` helpers as needed).
+- `sin` / `cos` / `tan` take **radians**
+- `sind` / `cosd` / `tand` take **degrees** (prefer these when a control range is in degrees)
+- Optional `deg` / `rad` flag on a range line is stored as metadata (`units`) for authors/tools; trig still uses the helpers above
 
 ### Animated SVG
 
@@ -137,6 +157,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 ```
 index.html          Editor shell
 src/
+  index.js          Library entry
   app.js            UI wiring
   document.js       Block model (parse and serialize)
   document-editor.js  Preview block editor

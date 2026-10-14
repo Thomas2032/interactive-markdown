@@ -115,6 +115,23 @@ export function mountIvm(container, fenceBody, options = {}) {
     return env;
   }
 
+  function wrapSvgTemplate(markup) {
+    const src = String(markup ?? "").trim();
+    if (!src) return src;
+    const w = parsed.svgWidth;
+    const h = parsed.svgHeight;
+    if (w == null || h == null || !Number.isFinite(w) || !Number.isFinite(h)) {
+      return src;
+    }
+    // Already a root <svg> — leave author markup alone
+    if (/^<svg\b/i.test(src)) return src;
+    return (
+      `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">\n` +
+      src +
+      `\n</svg>`
+    );
+  }
+
   /** Skip DOM writes when the substituted source is unchanged so CSS and SMIL keep running. */
   let lastFilled = null;
 
@@ -173,7 +190,7 @@ export function mountIvm(container, fenceBody, options = {}) {
       }
       return;
     }
-    const filled = substitute(parsed.templateSvg, env);
+    const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env);
     if (filled === lastFilled) return;
     lastFilled = filled;
     paintSvg(sanitizeSvg(filled));
