@@ -14,8 +14,10 @@
  *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
  *   @plot [WxH] [grid|nogrid]
  *   @axis x|y: min..max [step=S] ["Label"]
- *   @series [id] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N]
- *     y = expression   (free var `x` + controls/@let)
+ *   @series [id] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N] [label="Name"]
+ *     y = expression                 (Cartesian; free var `x`)
+ *     x = … / y = … / t = min..max   (parametric; free var `t`)
+ *     r = … / theta = min..max       (polar; free var `theta`)
  *   @grid on|off
  *   @graph
  *   @animate [path=ortho|straight|curve] [quantity=N] [direction=forward|reverse] [speed=seconds]
@@ -24,7 +26,8 @@
  *
  * Defaults: step=1, timer loop=true, speed=30. Omitted "Label" → UI shows name.
  * `@svg 200x80` stores width/height so the renderer can wrap non-root markup.
- * `@plot` builds a Cartesian chart (mutually exclusive with `@svg` / `@graph`).
+ * `@plot` builds a chart; optional trailing `@svg` is overlay chrome in the plot viewBox.
+ * `@plot` / `@svg` stay exclusive of `@graph`.
  */
 
 /**
@@ -46,10 +49,17 @@
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: string, quantity: number, direction: string, speed: number }} GraphMotion
  * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
- * @typedef {{ min: number, max: number, step?: number, label?: string }} PlotAxis
+ * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog', linthresh?: number }} PlotAxis
  * @typedef {{
  *   id?: string,
- *   expression: string,
+ *   label?: string,
+ *   kind?: 'y'|'parametric'|'polar',
+ *   expression?: string,
+ *   xExpression?: string,
+ *   yExpression?: string,
+ *   rExpression?: string,
+ *   tMin?: number,
+ *   tMax?: number,
  *   stroke?: string,
  *   fill?: string,
  *   fillOpacity?: number,
@@ -59,6 +69,8 @@
  *   width: number|null,
  *   height: number|null,
  *   grid: boolean,
+ *   legend?: boolean,
+ *   lockAspect?: boolean,
  *   x: PlotAxis|null,
  *   y: PlotAxis|null,
  *   series: PlotSeries[],
@@ -193,6 +205,22 @@ function parseBool(raw, fallback = false) {
 }
 
 /**
+ * Parse min..max used by series parameter ranges.
+ * @param {string} raw
+ * @returns {[number, number] | null}
+ */
+function parseRange(raw) {
+  const m = String(raw)
+    .trim()
+    .match(/^(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\.\.(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)$/);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return [a, b];
+}
+
+/**
  * @param {string} body  fence interior (no ```ivm wrapper)
  * @returns {IvmBlock}
  */
@@ -222,7 +250,7 @@ export function parseIvm(body) {
       continue;
     }
 
-    // @plot [WxH] [grid|nogrid]
+    // @plot [WxH] [grid|nogrid] [legend|nolegend] [lockAspect]
     if (/^@plot\b/i.test(line)) {
       if (plot) {
         errors.push("Duplicate @plot");
@@ -235,11 +263,20 @@ export function parseIvm(body) {
         continue;
       }
       if (templateSvg) {
-        errors.push("@plot cannot mix with @svg");
+        errors.push("@plot must come before @svg (overlay follows the plot)");
         i++;
         continue;
       }
-      plot = { width: null, height: null, grid: true, x: null, y: null, series: [] };
+      plot = {
+        width: null,
+        height: null,
+        grid: true,
+        legend: true,
+        lockAspect: false,
+        x: null,
+        y: null,
+        series: [],
+      };
       const rest = line.replace(/^@plot\b/i, "").trim();
       if (rest) {
         const size = rest.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\b/);
@@ -251,7 +288,12 @@ export function parseIvm(body) {
         }
         if (/\bnogrid\b/i.test(flags)) plot.grid = false;
         else if (/\bgrid\b/i.test(flags)) plot.grid = true;
-        const leftover = flags.replace(/\b(nogrid|grid)\b/gi, "").trim();
+        if (/\bnolegend\b/i.test(flags)) plot.legend = false;
+        else if (/\blegend\b/i.test(flags)) plot.legend = true;
+        if (/\b(lockAspect|aspect)\b/i.test(flags)) plot.lockAspect = true;
+        const leftover = flags
+          .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect)\b/gi, "")
+          .trim();
         if (leftover) errors.push(`@plot: unknown ${leftover}`);
       }
       i++;
@@ -273,7 +315,7 @@ export function parseIvm(body) {
       continue;
     }
 
-    // @axis x|y: min..max [step=S] ["Label"]
+    // @axis x|y: min..max [step=S] [scale=linear|log|symlog] [linthresh=N] ["Label"]
     {
       const m = line.match(/^@axis\s+([xy])\s*:\s*(.+)$/i);
       if (m) {
@@ -285,10 +327,10 @@ export function parseIvm(body) {
         const which = m[1].toLowerCase();
         const [rest, label] = takeLabel(m[2]);
         const rm = rest.match(
-          /^(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*(.*)$/
+          /^(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\.\.(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\s*(.*)$/
         );
         if (!rm) {
-          errors.push(`@axis ${which}: expected min..max [step=S]`);
+          errors.push(`@axis ${which}: expected min..max [step=S] [scale=…]`);
           i++;
           continue;
         }
@@ -303,6 +345,18 @@ export function parseIvm(body) {
         };
         if (step !== undefined && Number.isFinite(step) && step > 0) axis.step = step;
         if (label || flags.label) axis.label = label || flags.label;
+        const scaleRaw = flags.scale !== undefined ? String(flags.scale).toLowerCase() : "linear";
+        if (scaleRaw === "linear" || scaleRaw === "log" || scaleRaw === "symlog") {
+          axis.scale = scaleRaw;
+        } else {
+          errors.push(`@axis ${which}: unknown scale ${flags.scale}`);
+          axis.scale = "linear";
+        }
+        if (flags.linthresh !== undefined) {
+          const lt = Number(flags.linthresh);
+          if (Number.isFinite(lt) && lt > 0) axis.linthresh = lt;
+          else errors.push(`@axis ${which}: linthresh must be > 0`);
+        }
         if (which === "x") {
           if (plot.x) errors.push("Duplicate @axis x");
           plot.x = axis;
@@ -315,7 +369,7 @@ export function parseIvm(body) {
       }
     }
 
-    // @series [id] [flags] [y = expr]  — expression may continue on the next indented line
+    // @series [id] [flags] [y|x|r = expr] — continuations: y=/x=/r=/t=/theta=
     if (/^@series\b/i.test(line)) {
       if (!plot) {
         errors.push("@series is only valid after @plot");
@@ -324,21 +378,27 @@ export function parseIvm(body) {
       }
       const rest = line.replace(/^@series\b/i, "").trim();
       /** @type {PlotSeries} */
-      const series = { expression: "" };
-      // Optional leading id (not a key=value and not y=)
+      const series = {};
       let tail = rest;
       const idMatch = tail.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
-      if (idMatch && !/^(stroke|fill|fillOpacity|width|y)$/i.test(idMatch[1])) {
+      const reservedIds = /^(stroke|fill|fillOpacity|width|label|y|x|r|t|theta)$/i;
+      if (idMatch && !reservedIds.test(idMatch[1])) {
         series.id = idMatch[1];
         tail = tail.slice(idMatch[0].length).trim();
       }
-      // Inline y = expr?
-      const yInline = tail.match(/\by\s*=\s*(.+)$/i);
-      if (yInline) {
-        series.expression = yInline[1].trim();
-        tail = tail.slice(0, yInline.index).trim();
+      // Inline assignment on the same line (y= / x= / r=) — take the rightmost form
+      const inline = tail.match(/\b(y|x|r)\s*=\s*(.+)$/i);
+      if (inline) {
+        const key = inline[1].toLowerCase();
+        const expr = inline[2].trim();
+        if (key === "y") series.expression = expr;
+        else if (key === "x") series.xExpression = expr;
+        else series.rExpression = expr;
+        tail = tail.slice(0, inline.index).trim();
       }
-      const flags = parseFlags(tail);
+      const [tailNoLabel, inlineLabel] = takeLabel(tail);
+      const flags = parseFlags(tailNoLabel);
+      if (inlineLabel || flags.label) series.label = inlineLabel || flags.label;
       if (flags.stroke) series.stroke = flags.stroke;
       if (flags.fill) series.fill = flags.fill;
       if (flags.fillOpacity !== undefined) {
@@ -349,25 +409,67 @@ export function parseIvm(body) {
         const n = Number(flags.width);
         if (Number.isFinite(n)) series.width = n;
       }
-      // Continuation: next non-empty line starting with y = or indented
-      if (!series.expression) {
-        let j = i + 1;
-        while (j < lines.length) {
-          const next = lines[j];
-          if (!next.trim() || next.trim().startsWith("#")) {
-            j++;
-            continue;
-          }
-          const cont = next.match(/^\s+y\s*=\s*(.+)$/i) || next.match(/^y\s*=\s*(.+)$/i);
-          if (cont) {
-            series.expression = cont[1].trim();
-            i = j;
-          }
-          break;
-        }
+      if (flags.t !== undefined) {
+        const tr = parseRange(flags.t);
+        if (tr) {
+          series.tMin = tr[0];
+          series.tMax = tr[1];
+        } else errors.push(`@series: bad t range ${flags.t}`);
       }
-      if (!series.expression) errors.push("@series: expected y = expression");
-      else plot.series.push(series);
+      if (flags.theta !== undefined) {
+        const tr = parseRange(flags.theta);
+        if (tr) {
+          series.tMin = tr[0];
+          series.tMax = tr[1];
+        } else errors.push(`@series: bad theta range ${flags.theta}`);
+      }
+      // Continuations on following lines
+      let j = i + 1;
+      while (j < lines.length) {
+        const next = lines[j];
+        if (!next.trim() || next.trim().startsWith("#")) {
+          j++;
+          continue;
+        }
+        const cont = next.match(/^\s*(y|x|r|t|theta)\s*=\s*(.+)$/i);
+        if (!cont) break;
+        const key = cont[1].toLowerCase();
+        const value = cont[2].trim();
+        if (key === "y") series.expression = value;
+        else if (key === "x") series.xExpression = value;
+        else if (key === "r") series.rExpression = value;
+        else if (key === "t" || key === "theta") {
+          const tr = parseRange(value);
+          if (tr) {
+            series.tMin = tr[0];
+            series.tMax = tr[1];
+          } else errors.push(`@series: bad ${key} range ${value}`);
+        }
+        i = j;
+        j++;
+      }
+      // Infer kind
+      if (series.rExpression) {
+        series.kind = "polar";
+        if (series.tMin === undefined) series.tMin = 0;
+        if (series.tMax === undefined) series.tMax = Math.PI * 2;
+        if (!series.rExpression) errors.push("@series: polar needs r = expression");
+      } else if (series.xExpression && (series.expression || series.yExpression)) {
+        series.kind = "parametric";
+        if (series.expression && !series.yExpression) {
+          series.yExpression = series.expression;
+          delete series.expression;
+        }
+        if (series.tMin === undefined) series.tMin = 0;
+        if (series.tMax === undefined) series.tMax = Math.PI * 2;
+      } else if (series.expression) {
+        series.kind = "y";
+      } else if (series.xExpression && !series.expression) {
+        errors.push("@series: parametric needs both x = and y =");
+      } else {
+        errors.push("@series: expected y = expression (or x=/y= parametric, or r= polar)");
+      }
+      if (series.kind) plot.series.push(series);
       i++;
       continue;
     }
@@ -496,13 +598,8 @@ export function parseIvm(body) {
       continue;
     }
 
-    // @svg [WxH] — remainder of fence is SVG markup
+    // @svg [WxH] — remainder of fence is SVG markup (overlay when @plot is set)
     if (/^@svg\b/i.test(line)) {
-      if (plot) {
-        errors.push("@svg cannot mix with @plot");
-        i++;
-        continue;
-      }
       const after = line.replace(/^@svg\b/i, "").trim();
       const size = after.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*$/);
       if (size) {

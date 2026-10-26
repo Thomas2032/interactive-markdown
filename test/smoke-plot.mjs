@@ -62,9 +62,15 @@ const ng = parseIvm(`@plot 400x300 nogrid\n@axis x: 0..1\n@axis y: 0..1\n@series
 assert("size", ng.plot?.width === 400 && ng.plot?.height === 300);
 assert("nogrid", ng.plot?.grid === false);
 
-// reject mix
-const mix = parseIvm(`@plot\n@svg\n<svg/>\n`);
-assert("no mix svg", mix.errors.some((e) => /cannot mix/.test(e)));
+// plot + svg overlay is allowed
+const mix = parseIvm(`@plot\n@axis x: 0..1\n@axis y: 0..1\n@series y = x\n@svg\n<text x="10" y="20">hi</text>\n`);
+assert("overlay ok", mix.errors.length === 0, JSON.stringify(mix.errors));
+assert("overlay kept", typeof mix.templateSvg === "string" && mix.templateSvg.includes("<text"));
+assert("overlay still has plot", !!mix.plot);
+
+// still reject plot + graph
+const mixGraph = parseIvm(`@plot\n@graph\n`);
+assert("no mix graph", mixGraph.errors.some((e) => /cannot mix/.test(e)));
 
 // ticks helper
 const xt = ticks(-10, 10, 2);
@@ -164,6 +170,96 @@ assert("editor edit applied y max", /@axis y: 0\.\.1\b/.test(editedFence), edite
 assert("editor edit applied stroke", editedFence.includes("#112233"));
 const editedOut = serializeDocument(editDoc.blocks);
 assert("doc edit no 0x0", !/@plot\s+0x0\b/.test(editedOut), editedOut.match(/@plot[^\n]*/)?.[0]);
+
+
+// --- P0: log / symlog / legend / parametric / polar / soft errors ---
+const logBody = `
+@plot
+@axis x: 0.1..1000 scale=log "x"
+@axis y: 1..100 scale=log "y"
+@series power stroke=#7c3aed "power"
+  y = x ^ 1.5
+`;
+const logP = parseIvm(logBody);
+assert("log axis parse", logP.plot?.x?.scale === "log" && logP.plot?.y?.scale === "log", JSON.stringify(logP.plot?.x));
+assert("log series label", logP.plot?.series[0]?.label === "power" || logP.plot?.series[0]?.id === "power");
+const logErrs = [];
+const logSvg = buildPlotSvg(normalizePlot(logP.plot), {}, { errors: logErrs });
+assert("log svg", /im-plot-series/.test(logSvg) && /path/.test(logSvg));
+assert("log legend", /im-plot-legend/.test(logSvg) && /power/.test(logSvg));
+assert("log tick decade", /10\^/.test(logSvg) || />1</.test(logSvg) || />10</.test(logSvg));
+
+const sym = parseIvm(`@plot\n@axis x: -100..100 scale=symlog linthresh=2\n@axis y: -10..10\n@series y = x\n`);
+assert("symlog parse", sym.plot?.x?.scale === "symlog" && sym.plot?.x?.linthresh === 2);
+
+const para = parseIvm(`
+@plot lockAspect
+@axis x: -2..2
+@axis y: -2..2
+@series circle stroke=#2563eb "circle"
+  x = cos(t)
+  y = sin(t)
+  t = 0..6.2832
+@series rose stroke=#db2777
+  r = cos(3*theta)
+  theta = 0..6.2832
+`);
+assert("para errors", para.errors.length === 0, JSON.stringify(para.errors));
+assert("para kind", para.plot?.series[0]?.kind === "parametric", JSON.stringify(para.plot?.series[0]));
+assert("polar kind", para.plot?.series[1]?.kind === "polar", JSON.stringify(para.plot?.series[1]));
+assert("lockAspect", para.plot?.lockAspect === true);
+const paraSvg = buildPlotSvg(normalizePlot(para.plot), {});
+assert("para paths", (paraSvg.match(/<path /g) || []).length >= 2);
+
+const softErrs = [];
+buildPlotSvg(
+  normalizePlot({
+    x: { min: -1, max: 1 },
+    y: { min: -1, max: 1 },
+    series: [{ id: "bad", expression: "nope(x)", stroke: "#f00" }],
+  }),
+  {},
+  { errors: softErrs }
+);
+assert("soft series error", softErrs.some((e) => /@series bad/.test(e) && /nope/.test(e)), JSON.stringify(softErrs));
+
+resetNamespaces();
+const overlayHost = document.createElement("div");
+document.body.appendChild(overlayHost);
+const overlayMount = mountIvm(
+  overlayHost,
+  `@plot\n@axis x: -2..2\n@axis y: -1..1\n@series ok stroke=#0a0 y = sin(x)\n@series bad stroke=#f00 y = missing(x)\n@svg\n<text x="10" y="20">a={{1+1}}</text>\n`
+);
+assert("overlay mount class", overlayHost.classList.contains("im-ivm-plot"));
+const softBox = overlayHost.querySelector(".im-runtime-errors, .im-errors");
+assert("soft error UI", softBox && /@series bad/.test(softBox.textContent || ""), softBox?.textContent);
+const oScope = overlayHost.querySelector(".im-svg-host")?.shadowRoot || overlayHost.querySelector(".im-svg-host");
+assert("overlay still draws", !!oScope?.querySelector("path"));
+assert("overlay group", /im-plot-overlay/.test(oScope?.querySelector("svg")?.innerHTML || "") || !!oScope?.querySelector("text"));
+overlayMount.destroy();
+overlayHost.remove();
+
+const serLines = serializePlotLines(
+  normalizePlot({
+    x: { min: 0.1, max: 100, scale: "log", label: "x" },
+    y: { min: -2, max: 2, scale: "symlog", linthresh: 0.5 },
+    lockAspect: true,
+    legend: false,
+    series: [
+      { id: "c", kind: "parametric", xExpression: "cos(t)", yExpression: "sin(t)", tMin: 0, tMax: 6.28, stroke: "#111" },
+      { id: "p", kind: "polar", rExpression: "theta", tMin: 0, tMax: 3, stroke: "#222" },
+    ],
+  })
+);
+const serText = serLines.join("\n");
+assert("serialize scale", /scale=log/.test(serText) && /scale=symlog/.test(serText));
+assert("serialize linthresh", /linthresh=0\.5/.test(serText));
+assert("serialize lockAspect", /lockAspect/.test(serText));
+assert("serialize nolegend", /nolegend/.test(serText));
+assert("serialize parametric", /x = cos\(t\)/.test(serText) && /y = sin\(t\)/.test(serText));
+assert("serialize polar", /r = theta/.test(serText) && /theta = /.test(serText));
+const round = parseIvm(serText);
+assert("serialize round-trip kinds", round.plot?.series[0]?.kind === "parametric" && round.plot?.series[1]?.kind === "polar");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

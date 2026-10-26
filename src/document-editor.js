@@ -343,8 +343,22 @@ export function mountDocumentEditor(container, source, options = {}) {
           ["max", axis.max, "Max"],
           ["step", axis.step, "Step"],
           ["label", axis.label || "", "Label"],
+          ["scale", axis.scale || "linear", "Scale"],
+          ["linthresh", axis.linthresh ?? 1, "Symlog linthresh"],
         ]) {
-          const el = input(key === "label" ? "text" : "number", value ?? "");
+          let el;
+          if (key === "scale") {
+            el = docEl.createElement("select");
+            for (const opt of ["linear", "log", "symlog"]) {
+              const o = docEl.createElement("option");
+              o.value = opt;
+              o.textContent = opt;
+              if (opt === (value || "linear")) o.selected = true;
+              el.appendChild(o);
+            }
+          } else {
+            el = input(key === "label" ? "text" : "number", value ?? "");
+          }
           el.dataset.plotAxis = which;
           el.dataset.field = key;
           group.appendChild(field(title, el));
@@ -357,10 +371,52 @@ export function mountDocumentEditor(container, source, options = {}) {
         const legend = docEl.createElement("legend");
         legend.textContent = "Series" + (series.id ? ` ${series.id}` : "");
         group.appendChild(legend);
-        const expr = textarea(series.expression || "", 3);
-        expr.dataset.plotSeries = String(index);
-        expr.dataset.field = "expression";
-        group.appendChild(field("y =", expr));
+        const kind = series.kind || "y";
+        const kindEl = docEl.createElement("select");
+        for (const opt of ["y", "parametric", "polar"]) {
+          const o = docEl.createElement("option");
+          o.value = opt;
+          o.textContent = opt === "y" ? "y = f(x)" : opt;
+          if (opt === kind) o.selected = true;
+          kindEl.appendChild(o);
+        }
+        kindEl.dataset.plotSeries = String(index);
+        kindEl.dataset.field = "kind";
+        group.appendChild(field("Kind", kindEl));
+        if (kind === "polar") {
+          const expr = textarea(series.rExpression || "", 2);
+          expr.dataset.plotSeries = String(index);
+          expr.dataset.field = "rExpression";
+          group.appendChild(field("r =", expr));
+        } else if (kind === "parametric") {
+          const xe = textarea(series.xExpression || "", 2);
+          xe.dataset.plotSeries = String(index);
+          xe.dataset.field = "xExpression";
+          group.appendChild(field("x =", xe));
+          const ye = textarea(series.yExpression || series.expression || "", 2);
+          ye.dataset.plotSeries = String(index);
+          ye.dataset.field = "yExpression";
+          group.appendChild(field("y =", ye));
+        } else {
+          const expr = textarea(series.expression || "", 3);
+          expr.dataset.plotSeries = String(index);
+          expr.dataset.field = "expression";
+          group.appendChild(field("y =", expr));
+        }
+        if (kind === "parametric" || kind === "polar") {
+          const tMin = input("number", series.tMin ?? 0);
+          tMin.dataset.plotSeries = String(index);
+          tMin.dataset.field = "tMin";
+          group.appendChild(field(kind === "polar" ? "θ min" : "t min", tMin));
+          const tMax = input("number", series.tMax ?? 6.2832);
+          tMax.dataset.plotSeries = String(index);
+          tMax.dataset.field = "tMax";
+          group.appendChild(field(kind === "polar" ? "θ max" : "t max", tMax));
+        }
+        const labelEl = input("text", series.label || series.id || "");
+        labelEl.dataset.plotSeries = String(index);
+        labelEl.dataset.field = "label";
+        group.appendChild(field("Legend label", labelEl));
         for (const [key, value, title] of [
           ["stroke", series.stroke || "", "Stroke"],
           ["fill", series.fill || "", "Fill"],
@@ -942,11 +998,11 @@ export function mountDocumentEditor(container, source, options = {}) {
     if (el.dataset.plotAxis) {
       const which = el.dataset.plotAxis;
       const patch = {};
-      if (fieldName === "label") patch.label = el.value;
+      if (fieldName === "label" || fieldName === "scale") patch[fieldName] = el.value;
       else {
         const n = Number(el.value);
         if (!Number.isFinite(n)) return;
-        if (fieldName === "step" && n <= 0) return;
+        if ((fieldName === "step" || fieldName === "linthresh") && n <= 0) return;
         patch[fieldName] = n;
       }
       doc = { blocks: updatePlotAxis(doc, id, which, patch).blocks };
@@ -957,8 +1013,25 @@ export function mountDocumentEditor(container, source, options = {}) {
     if (el.dataset.plotSeries != null) {
       const index = Number(el.dataset.plotSeries);
       const patch = {};
-      if (fieldName === "expression" || fieldName === "stroke" || fieldName === "fill") {
+      const textFields = new Set([
+        "expression",
+        "xExpression",
+        "yExpression",
+        "rExpression",
+        "stroke",
+        "fill",
+        "label",
+        "kind",
+      ]);
+      if (textFields.has(fieldName)) {
         patch[fieldName] = el.value;
+        if (fieldName === "kind") {
+          // Repaint inspector so the right expression fields show
+          doc = { blocks: updatePlotSeries(doc, id, index, patch).blocks };
+          paint();
+          commit();
+          return;
+        }
       } else {
         const n = Number(el.value);
         if (!Number.isFinite(n)) return;

@@ -179,8 +179,32 @@ export function mountIvm(container, fenceBody, options = {}) {
     target.appendChild(node);
   }
 
+  /** @type {HTMLElement | null} */
+  let runtimeErrorsEl = null;
+
+  function showRuntimeErrors(msgs) {
+    const list = Array.isArray(msgs) ? msgs.filter(Boolean) : [];
+    if (!list.length) {
+      if (runtimeErrorsEl) {
+        runtimeErrorsEl.remove();
+        runtimeErrorsEl = null;
+      }
+      return;
+    }
+    if (!runtimeErrorsEl) {
+      runtimeErrorsEl = doc.createElement("div");
+      runtimeErrorsEl.className = "im-errors im-runtime-errors";
+      // Place after parse errors / controls, before svg host when possible
+      if (svgHost.parentNode === container) container.insertBefore(runtimeErrorsEl, svgHost);
+      else container.appendChild(runtimeErrorsEl);
+    }
+    runtimeErrorsEl.textContent = list.join("\n");
+  }
+
   function rebind() {
     const env = buildEnv();
+    /** @type {string[]} */
+    const softErrors = [];
     for (const [name, el] of valueLabels) {
       const v = env[name];
       el.textContent =
@@ -191,24 +215,39 @@ export function mountIvm(container, fenceBody, options = {}) {
         width: parsed.plot.width ?? undefined,
         height: parsed.plot.height ?? undefined,
         grid: parsed.plot.grid,
+        legend: parsed.plot.legend,
+        lockAspect: parsed.plot.lockAspect,
         x: parsed.plot.x || undefined,
         y: parsed.plot.y || undefined,
         series: parsed.plot.series || [],
       });
-      const filled = buildPlotSvg(model, env);
+      let overlayMarkup = null;
+      if (parsed.templateSvg) {
+        // Overlay uses the plot viewBox (0 0 W H). Ignore @svg WxH when overlaying.
+        const raw = String(parsed.templateSvg).trim();
+        const wrapped =
+          /^<svg\b/i.test(raw) || model.width == null
+            ? raw
+            : `<svg viewBox="0 0 ${model.width} ${model.height}" xmlns="http://www.w3.org/2000/svg">\n${raw}\n</svg>`;
+        overlayMarkup = substitute(wrapped, env, softErrors);
+      }
+      const filled = buildPlotSvg(model, env, { errors: softErrors, overlayMarkup });
+      showRuntimeErrors(softErrors);
       if (filled === lastFilled) return;
       lastFilled = filled;
       paintSvg(sanitizeSvg(filled));
       return;
     }
     if (!parsed.templateSvg) {
+      showRuntimeErrors([]);
       if (lastFilled !== "") {
         lastFilled = "";
         paintSvg("");
       }
       return;
     }
-    const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env);
+    const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env, softErrors);
+    showRuntimeErrors(softErrors);
     if (filled === lastFilled) return;
     lastFilled = filled;
     paintSvg(sanitizeSvg(filled));

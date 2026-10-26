@@ -138,5 +138,33 @@ assert("plot model", !!plot.plot && plot.plot.series.length === 1);
 assert("plot size", plot.plot.width === 480 && plot.plot.height === 320);
 assert("plot axis label", plot.plot.y.label === "density");
 
+const overlay = parseIvm(`
+@plot
+@axis x: 0..1
+@axis y: 0..1
+@series y = x
+@svg
+<text>{{1+1}}</text>
+`);
+assert("plot+svg overlay", overlay.errors.length === 0 && !!overlay.plot && overlay.templateSvg.includes("<text"));
+
+const modes = parseIvm(`
+@plot nolegend lockAspect
+@axis x: 1..100 scale=log
+@axis y: -10..10 scale=symlog linthresh=2 "Y"
+@series c
+  x = cos(t)
+  y = sin(t)
+  t = 0..6.28
+@series p
+  r = theta
+  theta = 0..3
+`);
+assert("modes errors", modes.errors.length === 0, JSON.stringify(modes.errors));
+assert("modes flags", modes.plot.legend === false && modes.plot.lockAspect === true);
+assert("modes scales", modes.plot.x.scale === "log" && modes.plot.y.scale === "symlog" && modes.plot.y.linthresh === 2);
+assert("modes parametric", modes.plot.series[0].kind === "parametric");
+assert("modes polar", modes.plot.series[1].kind === "polar");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

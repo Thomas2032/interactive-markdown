@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
-  "version": "0.3.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, a preview block builder, and an editable graph",
+  "version": "0.4.0",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots (log/parametric/polar, legends, SVG overlay), a preview block builder, and an editable graph",
   "main": "./src/index.js",
   "directories": {
     "example": "examples",

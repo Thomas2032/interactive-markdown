@@ -354,11 +354,13 @@ export function formatValue(value) {
 /**
  * Replace {{expr}} placeholders in a string using the evaluator.
  * Double-brace form avoids clashing with lone { } in SVG path data.
+ * Failed expressions stay as `{{…}}` and are pushed onto `errors` when provided.
  * @param {string} template
  * @param {Record<string, unknown>} env
+ * @param {string[]} [errors]
  * @returns {string}
  */
-export function substitute(template, env = {}) {
+export function substitute(template, env = {}, errors) {
   let out = "";
   let i = 0;
   const s = String(template);
@@ -397,7 +399,9 @@ export function substitute(template, env = {}) {
               out += formatValue(evaluate(expr, env));
             } catch (err) {
               out += "{{" + expr + "}}";
-              console.warn("[ivm expr]", err.message, "in", expr);
+              const msg = /** @type {Error} */ (err).message || String(err);
+              if (errors) errors.push(`{{${expr.trim()}}}: ${msg}`);
+              else console.warn("[ivm expr]", msg, "in", expr);
             }
             i = j + 2;
             break;

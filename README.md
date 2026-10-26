@@ -15,7 +15,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
-- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves
+- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **log/symlog** axes, **legends**, **parametric/polar** series, and optional **SVG overlay**
 - Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename; edits write back into the fence)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
@@ -76,9 +76,9 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is full SVG markup |
 | `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
-| `@plot [WxH] [grid\|nogrid]` | Cartesian XY plot (mutually exclusive with `@svg` / `@graph`) |
-| `@axis x\|y: min..max [step=S] ["Label"]` | Plot axis range and label |
-| `@series [id] …` / `y = expr` | Plot series (free var `x`) |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend] [lockAspect]` | XY plot (optional trailing `@svg` overlay; exclusive of `@graph`) |
+| `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Plot axis range, scale, and label |
+| `@series [id] …` / `y=` / `x=`+`y=` / `r=` | Plot series (Cartesian, parametric, or polar) |
 | `@grid on\|off` | Plot grid toggle |
 | `@graph` | Start an editable directed graph. This is the first directive in that fence |
 | `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
@@ -120,7 +120,15 @@ A fence that starts with `@graph` is a node-and-edge diagram. The preview is the
 
 ### XY plot
 
-A fence that starts with `@plot` draws a Cartesian chart. Axes, grid, and series are declared in the dialect; the renderer builds the SVG. Sliders and `@let` work the same as in figure blocks. Free variable `x` is sampled across the X axis when evaluating each series. Do not mix `@svg` or `@graph` into the same fence.
+A fence that starts with `@plot` draws a chart. Axes, grid, series, and an optional trailing `@svg` overlay are declared in the dialect; the renderer builds the SVG. Sliders and `@let` work the same as in figure blocks. Do not mix `@graph` into the same fence.
+
+**Series kinds**
+
+- Cartesian: `y = expr` (free var `x`)
+- Parametric: `x = …` / `y = …` / `t = min..max` (free var `t`)
+- Polar: `r = …` / `theta = min..max` (free var `theta`)
+
+Series `id` or `label="…"` feeds the legend (default on; `nolegend` to hide). A failed series or `{{expr}}` shows a soft error and leaves the rest of the figure intact.
 
 ````markdown
 ```ivm
@@ -131,17 +139,20 @@ A fence that starts with `@plot` draws a Cartesian chart. Axes, grid, and series
 @slider sigma: 0.5..4 = 1.5 step=0.1 "σ (std dev)"
 @series density stroke=#6d28d9 fill=#7c3aed fillOpacity=0.25
   y = (1/(sigma*sqrt(2*pi))) * exp(-0.5*((x-mu)/sigma)^2)
+@svg
+  <text x="72" y="36" font-size="12" fill="#374151">μ = {{mu}}</text>
 ```
 ````
 
 | Line | Meaning |
 |------|---------|
-| `@plot [WxH] [grid\|nogrid]` | Start an XY plot (default size 480×320, grid on) |
-| `@axis x\|y: min..max [step=S] ["Label"]` | Axis range, tick step, and title |
-| `@series [id] [stroke=#…] [fill=#…] [fillOpacity=N] [width=N]` | Curve style; next line (or same line) `y = expr` |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend] [lockAspect]` | Start an XY plot (default size 480×320, grid on, legend on when labels exist) |
+| `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Axis range, scale, tick step, and title |
+| `@series [id] [stroke=#…] [fill=#…] [fillOpacity=N] [width=N] ["Label"]` | Curve style; body is `y =`, or `x=`+`y=`+`t=`, or `r=`+`theta=` |
 | `@grid on\|off` | Toggle the background grid |
+| `@svg` (after `@plot`) | Overlay markup in the plot viewBox (`0 0 W H`) with `{{expr}}` |
 
-Defaults: grid **on**, fill opacity **0.25**, stroke `#6d28d9`, fill `#7c3aed`.
+Defaults: grid **on**, legend **on**, fill opacity **0.25**, stroke `#6d28d9`, fill `#7c3aed`, axis scale **linear**, symlog `linthresh` **1**.
 
 ### Expressions (`{{…}}`)
 
@@ -183,6 +194,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/agent-loop.md`](examples/agent-loop.md) — agent loop drawn as an animated graph
 - [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
 - [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
+- [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
 
 ## Project layout
 
