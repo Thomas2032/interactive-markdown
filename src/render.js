@@ -5,20 +5,22 @@
 import { evaluate, substitute } from "./expr.js";
 import { parseIvm } from "./parse-ivm.js";
 import { sanitizeSvg } from "./sanitize-svg.js";
-import { mountGraphEditor, serializeGraph } from "./graph-editor.js";
-import { buildPlotSvg, normalizePlot } from "./plot.js";
+import { mountGraphEditor, serializeGraph, normalizeMotion } from "./graph-editor.js";
+import { buildPlotSvg, normalizePlot, hitTestPlot } from "./plot.js";
 
 /** @type {Map<string, Record<string, unknown>>} */
 const namespaces = new Map();
 
 /**
  * @param {string|null} ns
+ * @param {Map<string, Record<string, unknown>> | null | undefined} store
  * @returns {Record<string, unknown>}
  */
-function getNamespaceState(ns) {
+function getNamespaceState(ns, store) {
   if (!ns) return {};
-  if (!namespaces.has(ns)) namespaces.set(ns, {});
-  return /** @type {Record<string, unknown>} */ (namespaces.get(ns));
+  const map = store || namespaces;
+  if (!map.has(ns)) map.set(ns, {});
+  return /** @type {Record<string, unknown>} */ (map.get(ns));
 }
 
 /** Clear shared `@ns` state (call before re-rendering a whole document). */
@@ -30,7 +32,12 @@ export function resetNamespaces() {
  * Mount one ```ivm fence body into a container element.
  * @param {HTMLElement} container
  * @param {string} fenceBody
- * @param {{ onGraphChange?: (body: string) => void }} [options]
+ * @param {{
+ *   onGraphChange?: (body: string) => void,
+ *   envStore?: Map<string, Record<string, unknown>>,
+ *   envKey?: string,
+ *   namespaces?: Map<string, Record<string, unknown>>,
+ * }} [options]
  * @returns {{ destroy: () => void, getState: () => Record<string, unknown> }}
  */
 export function mountIvm(container, fenceBody, options = {}) {
@@ -46,45 +53,36 @@ export function mountIvm(container, fenceBody, options = {}) {
     container.appendChild(err);
   }
 
-  if (parsed.graph) {
-    container.classList.add("im-ivm-graph");
-    const graphHost = doc.createElement("div");
-    container.appendChild(graphHost);
-    const mounted = mountGraphEditor(graphHost, parsed.graph, {
-      onChange(model) {
-        options.onGraphChange?.(serializeGraph(model));
-      },
-    });
-    return {
-      destroy() {
-        mounted.destroy();
-        container.innerHTML = "";
-      },
-      getState() {
-        return { graph: mounted.getModel() };
-      },
-    };
-  }
+  const nsMap = options.namespaces || namespaces;
+  const nsState = getNamespaceState(parsed.namespace, nsMap);
 
-  if (parsed.plot) container.classList.add("im-ivm-plot");
-
-  const nsState = getNamespaceState(parsed.namespace);
   /** @type {Record<string, unknown>} */
-  const local = Object.create(null);
+  let local;
+  if (options.envStore && options.envKey) {
+    if (!options.envStore.has(options.envKey)) {
+      options.envStore.set(options.envKey, Object.create(null));
+    }
+    local = /** @type {Record<string, unknown>} */ (options.envStore.get(options.envKey));
+  } else {
+    local = Object.create(null);
+  }
 
   for (const c of parsed.controls) {
     if (c.kind === "let" || c.name == null) continue;
-    const existing =
+    const existingNs =
       parsed.namespace && Object.prototype.hasOwnProperty.call(nsState, c.name)
         ? nsState[c.name]
         : undefined;
-    const val = existing !== undefined ? existing : c.default;
+    const existingLocal = Object.prototype.hasOwnProperty.call(local, c.name) ? local[c.name] : undefined;
+    const val = existingLocal !== undefined ? existingLocal : existingNs !== undefined ? existingNs : c.default;
     local[c.name] = val;
     if (parsed.namespace) nsState[c.name] = val;
   }
 
   const hasControls = parsed.controls.some((c) => c.kind !== "let" && c.name != null);
-  if (!hasControls) container.classList.add("im-ivm-static");
+  if (!hasControls && !parsed.graph) container.classList.add("im-ivm-static");
+  if (parsed.plot) container.classList.add("im-ivm-plot");
+  if (parsed.graph) container.classList.add("im-ivm-graph");
 
   const controlsEl = doc.createElement("div");
   controlsEl.className = "im-controls";
@@ -96,6 +94,12 @@ export function mountIvm(container, fenceBody, options = {}) {
   const cleanups = [];
   /** @type {Map<string, HTMLElement>} */
   const valueLabels = new Map();
+  /** @type {{ destroy: () => void, getModel: () => object, setLiveMotion?: (p: object|null) => void } | null} */
+  let graphMount = null;
+  /** @type {HTMLElement | null} */
+  let tooltipEl = null;
+  /** @type {SVGElement | null} */
+  let hoverMark = null;
 
   function buildEnv() {
     /** @type {Record<string, unknown>} */
@@ -126,7 +130,6 @@ export function mountIvm(container, fenceBody, options = {}) {
     if (w == null || h == null || !Number.isFinite(w) || !Number.isFinite(h)) {
       return src;
     }
-    // Already a root <svg> — leave author markup alone
     if (/^<svg\b/i.test(src)) return src;
     return (
       `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">\n` +
@@ -139,8 +142,6 @@ export function mountIvm(container, fenceBody, options = {}) {
   let lastFilled = null;
 
   /**
-   * Mount markup in a shadow root so <style> in the figure cannot restyle the editor.
-   * transform on the host makes position:fixed a local containing block.
    * @param {string} markup
    */
   function paintSvg(markup) {
@@ -153,29 +154,28 @@ export function mountIvm(container, fenceBody, options = {}) {
       }
     }
     const target = shadow || svgHost;
-    const doc = svgHost.ownerDocument || globalThis.document;
+    const owner = svgHost.ownerDocument || globalThis.document;
     target.innerHTML = "";
+    hoverMark = null;
     if (!markup) return;
 
-    // Scope figure CSS to this widget. transform makes position:fixed local.
-    if (shadow && doc?.createElement) {
-      const frame = doc.createElement("style");
+    if (shadow && owner?.createElement) {
+      const frame = owner.createElement("style");
       frame.textContent =
-        ":host{display:block;overflow:hidden;transform:translate(0)}" +
+        ":host{display:block;overflow:hidden;transform:translate(0);position:relative}" +
         "svg{display:block;max-width:100%;height:auto;margin:0 auto}" +
+        ".im-plot-hover{pointer-events:none}" +
         "@media (prefers-reduced-motion:reduce){:host *{animation:none!important}}";
       target.appendChild(frame);
     }
 
-    // Parse as XML and adopt the node. innerHTML would lowercase camelCase
-    // SVG tags (radialGradient, feGaussianBlur, animateMotion) and drop them.
     const Parser = globalThis.DOMParser;
     if (!Parser) return;
-    const parsed = new Parser().parseFromString(markup, "image/svg+xml");
-    const root = parsed.documentElement;
+    const parsedDoc = new Parser().parseFromString(markup, "image/svg+xml");
+    const root = parsedDoc.documentElement;
     const rootName = String(root?.localName || root?.tagName || "").toLowerCase();
     if (!root || rootName === "parsererror" || rootName !== "svg") return;
-    const node = typeof doc.importNode === "function" ? doc.importNode(root, true) : root;
+    const node = typeof owner.importNode === "function" ? owner.importNode(root, true) : root;
     target.appendChild(node);
   }
 
@@ -194,11 +194,103 @@ export function mountIvm(container, fenceBody, options = {}) {
     if (!runtimeErrorsEl) {
       runtimeErrorsEl = doc.createElement("div");
       runtimeErrorsEl.className = "im-errors im-runtime-errors";
-      // Place after parse errors / controls, before svg host when possible
       if (svgHost.parentNode === container) container.insertBefore(runtimeErrorsEl, svgHost);
       else container.appendChild(runtimeErrorsEl);
     }
     runtimeErrorsEl.textContent = list.join("\n");
+  }
+
+  function applyGraphMotion(env) {
+    if (!graphMount || !parsed.graph) return;
+    const motion = parsed.graph.animated ? normalizeMotion(parsed.graph.motion) : null;
+    if (!motion) {
+      graphMount.setLiveMotion?.(null);
+      return;
+    }
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+    let used = false;
+    if (motion.speedFrom) {
+      const v = Number(env[motion.speedFrom]);
+      if (Number.isFinite(v)) {
+        patch.speed = v;
+        used = true;
+      }
+    }
+    if (motion.quantityFrom) {
+      const v = Math.round(Number(env[motion.quantityFrom]));
+      if (Number.isFinite(v)) {
+        patch.quantity = v;
+        used = true;
+      }
+    }
+    // Always refresh animated graphs so quantity/speed literals stay in sync after remount
+    if (parsed.graph.animated) {
+      graphMount.setLiveMotion?.(used ? { ...motion, ...patch } : { ...motion });
+    } else {
+      graphMount.setLiveMotion?.(null);
+    }
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.hidden = true;
+    if (hoverMark && hoverMark.parentNode) hoverMark.parentNode.removeChild(hoverMark);
+    hoverMark = null;
+  }
+
+  function ensureTooltip() {
+    if (tooltipEl) return tooltipEl;
+    tooltipEl = doc.createElement("div");
+    tooltipEl.className = "im-plot-tooltip";
+    tooltipEl.hidden = true;
+    tooltipEl.setAttribute("role", "status");
+    container.appendChild(tooltipEl);
+    return tooltipEl;
+  }
+
+  /**
+   * @param {{ series: string, x: number, y: number, px: number, py: number, stroke: string }} hit
+   */
+  function showTooltip(hit) {
+    const tip = ensureTooltip();
+    const fmt = (n) => {
+      if (!Number.isFinite(n)) return "—";
+      const a = Math.abs(n);
+      if (a !== 0 && (a >= 1000 || a < 0.001)) return n.toExponential(3);
+      return String(Math.round(n * 1000) / 1000);
+    };
+    tip.hidden = false;
+    tip.innerHTML =
+      `<strong>${escapeHtml(hit.series)}</strong>` +
+      `<span>x = ${escapeHtml(fmt(hit.x))}</span>` +
+      `<span>y = ${escapeHtml(fmt(hit.y))}</span>`;
+
+    const root =
+      svgHost.shadowRoot?.querySelector?.("svg") || svgHost.querySelector?.("svg");
+    if (root) {
+      if (hoverMark && hoverMark.parentNode) hoverMark.parentNode.removeChild(hoverMark);
+      const owner = root.ownerDocument || doc;
+      const g = owner.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", "im-plot-hover");
+      const c = owner.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", String(hit.px));
+      c.setAttribute("cy", String(hit.py));
+      c.setAttribute("r", "5");
+      c.setAttribute("fill", hit.stroke || "#6d28d9");
+      c.setAttribute("stroke", "#ffffff");
+      c.setAttribute("stroke-width", "2");
+      g.appendChild(c);
+      root.appendChild(g);
+      hoverMark = g;
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function rebind() {
@@ -210,6 +302,13 @@ export function mountIvm(container, fenceBody, options = {}) {
       el.textContent =
         typeof v === "number" ? String(Math.round(v * 1000) / 1000) : String(v ?? "");
     }
+
+    if (parsed.graph) {
+      applyGraphMotion(env);
+      showRuntimeErrors([]);
+      return;
+    }
+
     if (parsed.plot) {
       const model = normalizePlot({
         width: parsed.plot.width ?? undefined,
@@ -223,7 +322,6 @@ export function mountIvm(container, fenceBody, options = {}) {
       });
       let overlayMarkup = null;
       if (parsed.templateSvg) {
-        // Overlay uses the plot viewBox (0 0 W H). Ignore @svg WxH when overlaying.
         const raw = String(parsed.templateSvg).trim();
         const wrapped =
           /^<svg\b/i.test(raw) || model.width == null
@@ -386,7 +484,77 @@ export function mountIvm(container, fenceBody, options = {}) {
   }
 
   if (hasControls) container.appendChild(controlsEl);
+
+  if (parsed.graph) {
+    const graphHost = doc.createElement("div");
+    container.appendChild(graphHost);
+    graphMount = mountGraphEditor(graphHost, parsed.graph, {
+      onChange(model) {
+        // Preserve control lines + animate bindings when rewriting the fence
+        const body = serializeGraphWithControls(parsed, model);
+        options.onGraphChange?.(body);
+      },
+    });
+    rebind();
+    return {
+      destroy() {
+        for (const fn of cleanups) fn();
+        graphMount?.destroy();
+        container.innerHTML = "";
+      },
+      getState() {
+        return { ...buildEnv(), graph: graphMount?.getModel() };
+      },
+    };
+  }
+
   container.appendChild(svgHost);
+
+  if (parsed.plot) {
+    const onMove = (event) => {
+      const root =
+        svgHost.shadowRoot?.querySelector?.("svg") || svgHost.querySelector?.("svg");
+      if (!root) {
+        hideTooltip();
+        return;
+      }
+      const rect = root.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        hideTooltip();
+        return;
+      }
+      const vb = root.viewBox?.baseVal;
+      const vbW = vb && vb.width ? vb.width : Number(root.getAttribute("width")) || rect.width;
+      const vbH = vb && vb.height ? vb.height : Number(root.getAttribute("height")) || rect.height;
+      const svgX = ((event.clientX - rect.left) / rect.width) * vbW;
+      const svgY = ((event.clientY - rect.top) / rect.height) * vbH;
+      const env = buildEnv();
+      const model = {
+        width: parsed.plot.width ?? undefined,
+        height: parsed.plot.height ?? undefined,
+        grid: parsed.plot.grid,
+        legend: parsed.plot.legend,
+        lockAspect: parsed.plot.lockAspect,
+        x: parsed.plot.x || undefined,
+        y: parsed.plot.y || undefined,
+        series: parsed.plot.series || [],
+      };
+      const hit = hitTestPlot(model, env, svgX, svgY);
+      if (!hit) {
+        hideTooltip();
+        return;
+      }
+      showTooltip(hit);
+    };
+    const onLeave = () => hideTooltip();
+    svgHost.addEventListener("pointermove", onMove);
+    svgHost.addEventListener("pointerleave", onLeave);
+    cleanups.push(() => {
+      svgHost.removeEventListener("pointermove", onMove);
+      svgHost.removeEventListener("pointerleave", onLeave);
+      hideTooltip();
+    });
+  }
 
   rebind();
 
@@ -399,4 +567,79 @@ export function mountIvm(container, fenceBody, options = {}) {
       return { ...buildEnv() };
     },
   };
+}
+
+/**
+ * Rewrite a graph fence while keeping controls / @ns / animate bindings.
+ * @param {import('./parse-ivm.js').IvmBlock | object} parsed
+ * @param {object} model
+ */
+function serializeGraphWithControls(parsed, model) {
+  const lines = [];
+  if (parsed.namespace) lines.push(`@ns ${parsed.namespace}`);
+  for (const c of parsed.controls || []) {
+    const line = serializeControlLine(c);
+    if (line) lines.push(line);
+  }
+  // serializeGraph emits @graph / @animate / nodes / edges
+  const graphBody = serializeGraph(mergeMotionBindings(model, parsed.graph?.motion));
+  lines.push(graphBody.replace(/\s*$/, ""));
+  return lines.join("\n").replace(/\s*$/, "\n");
+}
+
+/**
+ * Keep speedFrom/quantityFrom when the editor rewrites motion literals.
+ * @param {object} model
+ * @param {object | null | undefined} originalMotion
+ */
+function mergeMotionBindings(model, originalMotion) {
+  if (!model?.animated) return model;
+  const next = {
+    ...model,
+    motion: normalizeMotion({
+      ...normalizeMotion(originalMotion),
+      ...normalizeMotion(model.motion),
+      quantityFrom: originalMotion?.quantityFrom || model.motion?.quantityFrom,
+      speedFrom: originalMotion?.speedFrom || model.motion?.speedFrom,
+    }),
+  };
+  // If editor wrote literal quantity/speed, keep From names from original when present
+  if (originalMotion?.quantityFrom) next.motion.quantityFrom = originalMotion.quantityFrom;
+  if (originalMotion?.speedFrom) next.motion.speedFrom = originalMotion.speedFrom;
+  return next;
+}
+
+/**
+ * @param {object} c
+ * @returns {string|null}
+ */
+function serializeControlLine(c) {
+  if (!c || !c.kind) return null;
+  if (c.kind === "let") {
+    if (!c.name || c.expression == null) return null;
+    return `@let ${c.name} = ${c.expression}`;
+  }
+  if (c.kind === "slider" || c.kind === "timer") {
+    const [lo, hi] = c.range || [0, 1];
+    let line = `@${c.kind} ${c.name}: ${lo}..${hi} = ${c.default ?? lo}`;
+    if (c.step != null && c.step !== 1) line += ` step=${c.step}`;
+    if (c.kind === "timer") {
+      if (c.speed != null && c.speed !== 30) line += ` speed=${c.speed}`;
+      if (c.loop === false) line += " noloop";
+    }
+    if (c.units) line += ` ${c.units}`;
+    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
+    return line;
+  }
+  if (c.kind === "input") {
+    let line = `@input ${c.name}: ${JSON.stringify(String(c.default ?? ""))}`;
+    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
+    return line;
+  }
+  if (c.kind === "toggle") {
+    let line = `@toggle ${c.name}: ${c.default ? "true" : "false"}`;
+    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
+    return line;
+  }
+  return null;
 }

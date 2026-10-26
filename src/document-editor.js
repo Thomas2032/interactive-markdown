@@ -19,8 +19,8 @@ import {
   updatePlotMeta,
   NAME_RE,
 } from "./document.js";
-import { mountGraphEditor } from "./graph-editor.js";
 import { mountIvm, resetNamespaces } from "./render.js";
+import { parseIvm } from "./parse-ivm.js";
 
 const SHAPE_FIELDS = {
   rect: ["x", "y", "width", "height", "rx", "fill", "stroke", "stroke-width", "opacity"],
@@ -62,7 +62,7 @@ const ADD_GROUPS = [
 /**
  * @param {HTMLElement} container
  * @param {string} source
- * @param {{ onChange?: (markdown: string) => void, onStatus?: (message: string) => void, marked?: { parse: (markdown: string) => string } }} [options]
+ * @param {{ onChange?: (markdown: string) => void, onStatus?: (message: string) => void, marked?: { parse: (markdown: string) => string }, envStore?: Map<string, Record<string, unknown>>, namespaces?: Map<string, Record<string, unknown>> }} [options]
  * @returns {{ destroy: () => void }}
  */
 export function mountDocumentEditor(container, source, options = {}) {
@@ -311,16 +311,22 @@ export function mountDocumentEditor(container, source, options = {}) {
       return box;
     }
     if (block.type === "graph") {
+      const ns = input("text", block.namespace || "");
+      ns.dataset.field = "namespace";
+      box.appendChild(field("Shared name", ns));
       if (block.model?.animated) {
         const note = docEl.createElement("p");
         note.className = "im-doc-help";
-        note.textContent = "Dashes and dots run on this canvas. Path, quantity, direction, and seconds are on the canvas.";
+        note.textContent = "Dashes and dots run on this canvas. Path, quantity, direction, and seconds are on the canvas. Bind quantity/speed to slider names in the source.";
         const remove = docEl.createElement("button");
         remove.type = "button";
         remove.dataset.action = "remove-animation";
         remove.textContent = "Remove animation";
         box.append(note, remove);
       }
+      (block.controls || []).forEach((control, index) => {
+        box.appendChild(renderControl(block, control, index));
+      });
       return box;
     }
     if (block.type === "plot") {
@@ -605,20 +611,50 @@ export function mountDocumentEditor(container, source, options = {}) {
    * @param {object} block
    * @param {HTMLElement} host
    */
+  function envKeyFor(block) {
+    let i = 0;
+    for (const b of doc.blocks) {
+      if (b.type === "figure" || b.type === "graph" || b.type === "plot") {
+        if (b.id === block.id) return `ivm:${i}`;
+        i++;
+      }
+    }
+    return `block:${block.id}`;
+  }
+
+  function mountOptions(block) {
+    /** @type {Record<string, unknown>} */
+    const opts = {};
+    if (options.envStore) {
+      opts.envStore = options.envStore;
+      opts.envKey = envKeyFor(block);
+    }
+    if (options.namespaces) opts.namespaces = options.namespaces;
+    return opts;
+  }
+
   function mountLive(block, host) {
     if (block.type === "graph") {
       mounts.set(
         block.id,
-        mountGraphEditor(host, block.model || { nodes: [], edges: [] }, {
-          onChange(model) {
-            doc = { blocks: updateBlock(doc, block.id, { model }).blocks };
+        mountIvm(host, serializeFigure(block), {
+          ...mountOptions(block),
+          onGraphChange(body) {
+            const parsed = parseIvm(body);
+            doc = {
+              blocks: updateBlock(doc, block.id, {
+                model: parsed.graph || block.model,
+                controls: parsed.controls || [],
+                namespace: parsed.namespace,
+              }).blocks,
+            };
             commit();
           },
         })
       );
       return;
     }
-    mounts.set(block.id, mountIvm(host, serializeFigure(block)));
+    mounts.set(block.id, mountIvm(host, serializeFigure(block), mountOptions(block)));
   }
 
   /**
@@ -634,7 +670,7 @@ export function mountDocumentEditor(container, source, options = {}) {
       mounts.delete(id);
     }
     host.innerHTML = "";
-    mounts.set(id, mountIvm(host, serializeFigure(block)));
+    mounts.set(id, mountIvm(host, serializeFigure(block), mountOptions(block)));
   }
 
   /**

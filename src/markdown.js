@@ -27,7 +27,7 @@ function resolveMarked(override) {
  * @returns {{ destroy: () => void }}
  */
 export function renderDocument(previewEl, source, options = {}) {
-  resetNamespaces();
+  if (!options.namespaces && !options.envStore) resetNamespaces();
   previewEl.innerHTML = "";
 
   const doc = previewEl.ownerDocument || globalThis.document;
@@ -58,6 +58,9 @@ export function renderDocument(previewEl, source, options = {}) {
           onGraphChange(body) {
             options.onGraphChange?.(fenceIndex, body);
           },
+          envStore: options.envStore,
+          envKey: options.envStore ? `ivm:${fenceIndex}` : undefined,
+          namespaces: options.namespaces,
         })
       );
     }
