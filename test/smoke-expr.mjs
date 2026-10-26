@@ -93,5 +93,43 @@ try {
 }
 assert("eval fn throws", threw);
 
+
+// arrays + map/reduce
+assert("array lit", Array.isArray(evaluate("[1,2,3]")) && evaluate("[1,2,3]").length === 3);
+assert("len", evaluate("len([1,2,3])") === 3);
+assert("nth", evaluate("nth([10,20], 1)") === 20);
+assert("sum/mean", evaluate("sum([1,2,3])") === 6 && evaluate("mean([2,4])") === 3);
+assert("range", evaluate("len(range(0,2,1))") === 3);
+assert("map fn", JSON.stringify(evaluate("map([0,90], sind)")) === "[0,1]");
+assert("map expr", JSON.stringify(evaluate('map([1,2], "_ * 10")')) === "[10,20]");
+assert("reduce", evaluate('reduce([1,2,3], "acc + _", 0)') === 6);
+assert("points", evaluate("points([1,2],[3,4])") === "1,3 2,4");
+
+// user @fn via options.functions
+assert(
+  "user fn",
+  evaluate("double(3)", {}, { functions: { double: { params: ["x"], expression: "x * 2" } } }) === 6
+);
+assert(
+  "user fn env",
+  evaluate("wave(0)", { amp: 2 }, { functions: { wave: { params: ["x"], expression: "amp * cos(x)" } } }) === 2
+);
+
+// angle mode deg: sin(90) == 1
+assert("angle deg sin", Math.abs(evaluate("sin(90)", {}, { angleMode: "deg" }) - 1) < 1e-12);
+assert("angle deg cos", Math.abs(evaluate("cos(0)", {}, { angleMode: "deg" }) - 1) < 1e-12);
+assert("angle rad default", Math.abs(evaluate("sin(pi/2)") - 1) < 1e-12);
+assert("sind ignores mode", Math.abs(evaluate("sind(90)", {}, { angleMode: "rad" }) - 1) < 1e-12);
+
+// phases
+const phases = [
+  { name: "rise", min: 0, max: 1 },
+  { name: "hold", min: 1, max: 3 },
+];
+assert("inPhase", evaluate('inPhase(1.5, "hold")', {}, { phases }) === true);
+assert("phaseT", Math.abs(evaluate('phaseT(0.5, "rise")', {}, { phases }) - 0.5) < 1e-12);
+assert("phaseAt", evaluate("phaseAt(2)", {}, { phases }) === "hold");
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

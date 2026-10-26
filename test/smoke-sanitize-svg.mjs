@@ -23,7 +23,11 @@ assert("isSafeHref data image", isSafeHref("data:image/png;base64,xx") === true)
 assert("isSafeHref rejects svg data", isSafeHref("data:image/svg+xml,xxx") === false);
 assert("isSafeHref http", isSafeHref("https://evil.test/x") === false);
 assert("isSafeHref javascript", isSafeHref("javascript:alert(1)") === false);
-assert("isSafeHref relative", isSafeHref("../x.svg") === false);
+assert("isSafeHref relative traversal", isSafeHref("../x.svg") === false);
+assert("isSafeHref relative local", isSafeHref("assets/icon.png") === true);
+assert("isSafeHref root-relative", isSafeHref("/icons/a.png") === true);
+assert("isSafeHref data font", isSafeHref("data:font/woff2;base64,AA==") === true);
+assert("isSafeHref protocol-relative", isSafeHref("//evil.test/x.png") === false);
 assert("SAFE_SVG_TAGS has path", SAFE_SVG_TAGS.includes("path"));
 assert("SAFE_SVG_TAGS has style", SAFE_SVG_TAGS.includes("style"));
 assert("SAFE_SVG_TAGS has filter", SAFE_SVG_TAGS.includes("filter"));
@@ -66,6 +70,9 @@ assert("strips onload", !/onload/i.test(withScript));
 assert("strips external a href", !/evil\.test/i.test(withScript), withScript);
 assert("strips external image href", !/a\.png/i.test(withScript));
 assert("keeps data image", /data:image\/png/i.test(withScript), withScript);
+const localImg = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg"><image href="assets/icon.png"/><image href="https://evil.test/a.png"/></svg>`);
+assert("keeps relative image", /assets\/icon\.png/i.test(localImg), localImg);
+assert("strips remote image still", !/evil\.test/i.test(localImg), localImg);
 assert("strips use", !/<use\b/i.test(withScript));
 assert("keeps circle after sanitize", /<circle\b/i.test(withScript));
 
@@ -113,7 +120,7 @@ assert("keeps opacity animation", /attributeName="opacity"/i.test(animated), ani
 assert("keeps animateMotion", /animateMotion/i.test(animated), animated);
 assert("animated svg has no remote url", !/evil\.test/i.test(animated), animated);
 assert("animated svg has no import", !/@import/i.test(animated), animated);
-assert("animated svg has no font-face", !/@font-face/i.test(animated), animated);
+assert("animated svg font-face kept but remote cleared", /@font-face/i.test(animated) && !/evil\.test/i.test(animated), animated);
 assert("animated svg has no javascript", !/javascript/i.test(animated), animated);
 
 const css = sanitizeCss(

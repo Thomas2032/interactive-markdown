@@ -185,5 +185,27 @@ const fullScope = svgScope(fullHost);
 assert("no double svg", fullScope.querySelectorAll("svg").length === 1);
 assert("kept author viewBox", fullScope.querySelector("svg").getAttribute("viewBox") === "0 0 100 50");
 
+
+{
+  const body = `
+@angle deg
+@fn wave(x) = sin(x)
+@phase hold: 1..3
+@timer t: 0..4 = 1.5 speed=1
+@let y = wave(90)
+@let on = inPhase(t, "hold")
+@svg 100x40
+  <text>{{round(y,2)}} {{on}}</text>
+`;
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const m = mountIvm(host, body);
+  const st = m.getState();
+  assert("p2 angle deg", Math.abs(Number(st.y) - 1) < 1e-9, String(st.y));
+  assert("p3 inPhase", st.on === true, String(st.on));
+  m.destroy();
+  host.remove();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

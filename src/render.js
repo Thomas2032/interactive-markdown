@@ -23,6 +23,52 @@ function getNamespaceState(ns, store) {
   return /** @type {Record<string, unknown>} */ (map.get(ns));
 }
 
+
+/**
+ * @param {import('./parse-ivm.js').IvmBlock | object} parsed
+ * @returns {{
+ *   angleMode: 'deg'|'rad'|null,
+ *   functions: Record<string, { params: string[], expression: string }>,
+ *   phases: { name: string, min: number, max: number }[],
+ * }}
+ */
+function exprOptionsFrom(parsed) {
+  /** @type {Record<string, { params: string[], expression: string }>} */
+  const functions = Object.create(null);
+  for (const fn of parsed?.fns || []) {
+    if (!fn?.name) continue;
+    functions[fn.name] = { params: fn.params || [], expression: fn.expression || "0" };
+  }
+  return {
+    angleMode: parsed?.angleMode === "deg" || parsed?.angleMode === "rad" ? parsed.angleMode : null,
+    functions,
+    phases: Array.isArray(parsed?.phases) ? parsed.phases.map((p) => ({ ...p })) : [],
+  };
+}
+
+/**
+ * Emit @angle / @fn / @phase lines for fence rewrite.
+ * @param {import('./parse-ivm.js').IvmBlock | object} parsed
+ * @returns {string[]}
+ */
+function serializeMetaLines(parsed) {
+  /** @type {string[]} */
+  const lines = [];
+  if (parsed?.angleMode === "deg" || parsed?.angleMode === "rad") {
+    lines.push(`@angle ${parsed.angleMode}`);
+  }
+  for (const fn of parsed?.fns || []) {
+    if (!fn?.name) continue;
+    const params = (fn.params || []).join(", ");
+    lines.push(`@fn ${fn.name}(${params}) = ${fn.expression ?? "0"}`);
+  }
+  for (const phase of parsed?.phases || []) {
+    if (!phase?.name) continue;
+    lines.push(`@phase ${phase.name}: ${phase.min}..${phase.max}`);
+  }
+  return lines;
+}
+
 /** Clear shared `@ns` state (call before re-rendering a whole document). */
 export function resetNamespaces() {
   namespaces.clear();
@@ -101,6 +147,8 @@ export function mountIvm(container, fenceBody, options = {}) {
   /** @type {SVGElement | null} */
   let hoverMark = null;
 
+  const exprOpts = exprOptionsFrom(parsed);
+
   function buildEnv() {
     /** @type {Record<string, unknown>} */
     const env = Object.create(null);
@@ -110,7 +158,7 @@ export function mountIvm(container, fenceBody, options = {}) {
     for (const c of parsed.controls) {
       if (c.kind !== "let" || !c.name || !c.expression) continue;
       try {
-        const v = evaluate(c.expression, env);
+        const v = evaluate(c.expression, env, exprOpts);
         env[c.name] = v;
         local[c.name] = v;
         if (parsed.namespace) nsState[c.name] = v;
@@ -327,9 +375,9 @@ export function mountIvm(container, fenceBody, options = {}) {
           /^<svg\b/i.test(raw) || model.width == null
             ? raw
             : `<svg viewBox="0 0 ${model.width} ${model.height}" xmlns="http://www.w3.org/2000/svg">\n${raw}\n</svg>`;
-        overlayMarkup = substitute(wrapped, env, softErrors);
+        overlayMarkup = substitute(wrapped, env, softErrors, exprOpts);
       }
-      const filled = buildPlotSvg(model, env, { errors: softErrors, overlayMarkup });
+      const filled = buildPlotSvg(model, env, { errors: softErrors, overlayMarkup, exprOptions: exprOpts });
       showRuntimeErrors(softErrors);
       if (filled === lastFilled) return;
       lastFilled = filled;
@@ -344,7 +392,7 @@ export function mountIvm(container, fenceBody, options = {}) {
       }
       return;
     }
-    const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env, softErrors);
+    const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env, softErrors, exprOpts);
     showRuntimeErrors(softErrors);
     if (filled === lastFilled) return;
     lastFilled = filled;
@@ -539,7 +587,7 @@ export function mountIvm(container, fenceBody, options = {}) {
         y: parsed.plot.y || undefined,
         series: parsed.plot.series || [],
       };
-      const hit = hitTestPlot(model, env, svgX, svgY);
+      const hit = hitTestPlot(model, env, svgX, svgY, { exprOptions: exprOpts });
       if (!hit) {
         hideTooltip();
         return;
@@ -577,6 +625,7 @@ export function mountIvm(container, fenceBody, options = {}) {
 function serializeGraphWithControls(parsed, model) {
   const lines = [];
   if (parsed.namespace) lines.push(`@ns ${parsed.namespace}`);
+  lines.push(...serializeMetaLines(parsed));
   for (const c of parsed.controls || []) {
     const line = serializeControlLine(c);
     if (line) lines.push(line);

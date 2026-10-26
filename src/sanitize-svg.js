@@ -79,7 +79,7 @@ export const SAFE_SVG_TAGS = Object.freeze([
   "fedistantlight",
   "fepointlight",
   "fespotlight",
-  "image", // only with safe href (data:image or #)
+  "image", // safe href: #, data:image (non-svg), data:font, same-origin / local path
   "switch",
   "a", // href must be safe (# only in practice)
   "style", // sanitized CSS only; renderer scopes it to the figure
@@ -87,16 +87,59 @@ export const SAFE_SVG_TAGS = Object.freeze([
 ]);
 
 /**
+ * True for inline font data URLs (woff / woff2 / otf / ttf via common MIME types).
+ * @param {string} low lowercase trimmed href
+ */
+function isSafeDataFont(low) {
+  if (low.startsWith("data:font/")) return true;
+  if (low.startsWith("data:application/font-woff")) return true;
+  if (low.startsWith("data:application/font-sfnt")) return true;
+  if (low.startsWith("data:application/x-font-")) return true;
+  if (low.startsWith("data:application/octet-stream;base64,")) return false; // too broad
+  return false;
+}
+
+/**
+ * Same-origin http(s) URL, or a relative path with no ".." / scheme / protocol-relative host.
+ * @param {string} href original (not lowercased) trimmed href
+ * @param {string} low lowercase trimmed href
+ */
+function isLocalAsset(href, low) {
+  if (low.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    // Absolute URL — allow only same-origin http(s)
+    try {
+      const base = globalThis.location;
+      if (!base || !base.origin || base.origin === "null") return false;
+      if (!/^https?:/i.test(href)) return false;
+      const u = new URL(href, base.href);
+      return u.origin === base.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+  // Relative / root-relative path: no backslash, no "..", no embedded scheme
+  if (href.includes("\\") || href.includes("..")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
+  // Reject query-only / weird empty
+  if (!href || href.startsWith("?")) return false;
+  return true;
+}
+
+/**
  * @param {string} href
  * @returns {boolean}
  */
 export function isSafeHref(href) {
   if (href == null || href === "") return true;
-  const v = String(href).trim().toLowerCase();
+  const raw = String(href).trim();
+  const v = raw.toLowerCase();
   if (v.startsWith("#")) return true;
   if (v.startsWith("data:image/") && !v.startsWith("data:image/svg")) return true;
-  // Block javascript:, http(s):, file:, svg data urls, and any other scheme or relative URL
-  return false;
+  if (isSafeDataFont(v)) return true;
+  // Local / same-origin assets (fonts, icons) — never javascript:/data:svg/remote cross-origin
+  if (v.startsWith("javascript:") || v.startsWith("data:")) return false;
+  return isLocalAsset(raw, v);
 }
 
 /**
@@ -115,7 +158,7 @@ export function sanitizeCss(css) {
   s = s.replace(/<!--/g, "").replace(/-->/g, "");
   // Prevent </style> breakout when the markup is later parsed as HTML.
   s = s.replace(/</g, "");
-  s = stripAtBlocks(s, ["font-face", "document"]);
+  s = stripAtBlocks(s, ["document"]);
   s = s.replace(/@import\b[^;{]*;?/gi, "");
   s = s.replace(/@(charset|namespace)\b[^;{]*;?/gi, "");
   s = s.replace(/expression\s*\(/gi, "(");
@@ -207,7 +250,9 @@ function isSafeCssUrl(body) {
   const low = v.toLowerCase();
   if (v.startsWith("#")) return !/[\s"'()]/.test(v);
   if (low.startsWith("data:image/") && !low.startsWith("data:image/svg")) return true;
-  return false;
+  if (isSafeDataFont(low)) return true;
+  if (low.startsWith("javascript:") || low.startsWith("data:")) return false;
+  return isLocalAsset(v, low);
 }
 
 function replaceUnsafeUrls(css) {

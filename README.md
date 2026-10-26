@@ -13,6 +13,8 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Open / save `.md`, with a **localStorage** draft
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
+- Pure `@fn` macros, arrays (`range` / `map` / `reduce`), and fence `@angle deg|rad` trig mode
+- Named `@phase` spans + timer scrub helpers (`inPhase` / `phaseT` / `phaseAt`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
 - **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **log/symlog** axes, **legends**, **parametric/polar** series, optional **SVG overlay**, and **hover tooltips**
@@ -21,7 +23,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
-- SVG sanitizer (strips scripts, event handlers, external hrefs)
+- SVG sanitizer (strips scripts, event handlers, remote hrefs; allows same-origin / relative paths and `data:` images/fonts)
 
 ## Quick start
 
@@ -75,6 +77,9 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@toggle name: true\|false ["Label"]` | Checkbox (`@b` alias) |
 | `@let name = expression` | Computed value (`@l` alias) |
 | `@calc name = expression` | Alias of `@let` (compat only; prefer `@let`) |
+| `@fn name(params) = expression` | Pure macro (`@f` alias); call as `name(...)` in exprs |
+| `@angle deg\|rad` | Fence-wide trig mode (`@mode` alias). When `deg`, `sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`atan2` use **degrees** |
+| `@phase name: min..max` | Named timeline span for `inPhase` / `phaseT` / `phaseAt` |
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is full SVG markup |
 | `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
@@ -103,6 +108,7 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@i` | `@input` |
 | `@b` | `@toggle` |
 | `@l` | `@let` |
+| `@f` | `@fn` |
 
 Humans and docs should use the long forms. Generators may emit short aliases; both parse.
 
@@ -165,13 +171,17 @@ Placeholders use **double braces** only: `{{expr}}`.
 
 Allowed operators include `+ - * / % ^ **`, comparisons, `&& || !`, and ternary `? :`.
 
-Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sind`, `cosd`, `tand`, `asind`, `acosd`, `atand`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `deg`, `rad`.
+Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sind`, `cosd`, `tand`, `asind`, `acosd`, `atand`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `deg`, `rad`, plus array helpers `len`, `nth`, `first`, `last`, `sum`, `mean`, `join`, `range`, `map`, `reduce`, `points`, and phase helpers `inPhase`, `phaseT`, `phaseAt`.
 
 Constants: `pi`, `e`, `tau`.
 
-- `sin` / `cos` / `tan` take **radians**
-- `sind` / `cosd` / `tand` take **degrees** (prefer these when a control range is in degrees)
-- Optional `deg` / `rad` flag on a range line is stored as metadata (`units`) for authors/tools; trig still uses the helpers above
+Arrays: `[1, 2, x]`, `range(a, b, step?)`, `map(arr, fnName|"expr with _")`, `reduce(arr, fnName|"acc/_ expr", init)`, `points(xs, ys)` for SVG polylines.
+
+- Default: `sin` / `cos` / `tan` take **radians**
+- With `@angle deg` on the fence: `sin` / `cos` / `tan` / inverses use **degrees** (documented footgun fix)
+- `sind` / `cosd` / `tand` always take **degrees**, regardless of `@angle`
+- Optional `deg` / `rad` flag on a range line is still stored as metadata (`units`)
+- `@phase name: min..max` + `inPhase(t,"name")` / `phaseT(t,"name")` / `phaseAt(t)` for timeline scrubbing with `@timer`
 
 ### Animated SVG
 
@@ -182,7 +192,7 @@ Everything after `@svg` can be a self-contained animated figure:
 - Filters (`feGaussianBlur`, …) and paint servers such as `url(#id)`
 - `<use href="#symbol-id">` for icons defined in the same SVG
 
-Scripts, event handlers, and remote URLs are still removed. The figure is mounted in a shadow root so its CSS cannot restyle the editor. The SVG is rewritten only when the substituted markup changes, so those animations keep playing while sliders sit still.
+Scripts, event handlers, and **remote** URLs are still removed. **Same-origin / relative** paths and inline `data:image/…` / `data:font/…` assets are kept. Scrub a CSS `@keyframes` timeline by pairing `@timer t` with `animation-play-state: paused` and `animation-delay: -{{t}}s`. The figure is mounted in a shadow root so its CSS cannot restyle the editor. The SVG is rewritten only when the substituted markup changes, so those animations keep playing while sliders sit still.
 
 A block with only `@svg` (no controls) renders as a full-width figure.
 
@@ -199,7 +209,9 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/agent-loop.md`](examples/agent-loop.md) — agent loop drawn as an animated graph
 - [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
 - [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
-- [`examples/p0-demo / p1-demo.md`](examples/p0-demo / p1-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
+- [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
+- [`examples/p1-demo.md`](examples/p1-demo.md) — graph controls, self-edges, corner ports, shared env, plot tooltips
+- [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
 
 ## Project layout
 

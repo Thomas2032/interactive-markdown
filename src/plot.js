@@ -177,6 +177,7 @@ function seriesIsDrawable(series) {
  */
 export function buildPlotSvg(plot, env = {}, options = {}) {
   const errors = options.errors || [];
+  const exprOptions = options.exprOptions || {};
   const model = normalizePlot(plot);
   const W = model.width;
   const H = model.height;
@@ -252,7 +253,7 @@ export function buildPlotSvg(plot, env = {}, options = {}) {
   /** @type {{ label: string, stroke: string }[]} */
   const legendItems = [];
   for (const series of model.series) {
-    const sampled = sampleSeries(series, model, env, errors);
+    const sampled = sampleSeries(series, model, env, errors, exprOptions);
     const points = sampled.points;
     const name = seriesLabel(series);
     if (name) legendItems.push({ label: name, stroke: series.stroke || DEFAULT_STROKE });
@@ -469,7 +470,7 @@ function symlogTicks(min, max, linthresh) {
  * @param {string[]} errors
  * @returns {{ points: { x: number, y: number }[], hadError: boolean }}
  */
-function sampleSeries(series, model, env, errors) {
+function sampleSeries(series, model, env, errors, exprOptions = {}) {
   const n = model.samples;
   /** @type {{ x: number, y: number }[]} */
   const points = [];
@@ -484,7 +485,7 @@ function sampleSeries(series, model, env, errors) {
 
   const evalLocal = (expression, local) => {
     try {
-      return Number(evaluate(expression, local));
+      return Number(evaluate(expression, local, exprOptions));
     } catch (err) {
       if (!firstError) firstError = /** @type {Error} */ (err).message || String(err);
       hadError = true;
@@ -774,11 +775,12 @@ export function hitTestPlot(plot, env, svgX, svgY, options = {}) {
     return null;
   }
   const maxDist = options.maxDist ?? 14;
+  const exprOptions = options.exprOptions || {};
   /** @type {{ series: string, x: number, y: number, px: number, py: number, stroke: string, dist: number } | null} */
   let best = null;
   const errors = [];
   for (const series of model.series) {
-    const sampled = sampleSeries(series, model, env, errors);
+    const sampled = sampleSeries(series, model, env, errors, exprOptions);
     const label = seriesLabel(series) || series.id || "series";
     for (const p of sampled.points) {
       const px = xToPx(p.x);

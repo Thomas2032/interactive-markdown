@@ -166,5 +166,29 @@ assert("modes scales", modes.plot.x.scale === "log" && modes.plot.y.scale === "s
 assert("modes parametric", modes.plot.series[0].kind === "parametric");
 assert("modes polar", modes.plot.series[1].kind === "polar");
 
+
+const p23 = parseIvm(`
+@angle deg
+@fn wave(x) = amp * sin(x)
+@fn tip(a, b) = a + b
+@phase rise: 0..1.2
+@phase hold: 1.2..2.8
+@slider amp: 0..2 = 1
+@let y = wave(90)
+@svg 10x10
+  <circle r="1"/>
+`);
+assert("p23 errors", p23.errors.length === 0, JSON.stringify(p23.errors));
+assert("angleMode deg", p23.angleMode === "deg");
+assert("fns count", p23.fns.length === 2, String(p23.fns.length));
+assert("fn wave params", p23.fns[0].name === "wave" && p23.fns[0].params[0] === "x");
+assert("fn tip params", p23.fns[1].params.length === 2);
+assert("phases", p23.phases.length === 2 && p23.phases[0].name === "rise");
+assert("phase max", p23.phases[1].max === 2.8);
+
+const badFn = parseIvm(`@fn sin(x) = x\n@svg\n<svg/>\n`);
+assert("duplicate builtin fn still parses", badFn.fns.some((f) => f.name === "sin"));
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
