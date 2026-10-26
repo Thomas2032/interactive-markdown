@@ -8,6 +8,8 @@ import {
   nextNodePosition,
   removeSelection,
   serializeGraph,
+  setMotion,
+  normalizeMotion,
 } from "../src/graph-editor.js";
 import { renderDocument } from "../src/markdown.js";
 
@@ -274,6 +276,21 @@ assert("self edge drawn", !!portsHost.querySelector(".im-graph-edge"));
 portsMounted.setLiveMotion({ quantity: 5, speed: 1.2 });
 assert("live motion dots", portsHost.querySelectorAll("animateMotion").length === 5);
 portsMounted.destroy();
+
+// P4: toolbar literal edits clear quantityFrom/speedFrom bindings
+const boundModel = {
+  nodes: [{ id: "a", label: "A", x: 0, y: 0, kind: "action" }],
+  edges: [],
+  animated: true,
+  motion: { path: "curve", quantity: 2, direction: "forward", speed: 2.4, quantityFrom: "dots", speedFrom: "pace" },
+};
+const clearedQty = setMotion(boundModel, { quantity: 4 });
+assert("literal quantity clears quantityFrom", clearedQty.motion.quantity === 4 && !clearedQty.motion.quantityFrom);
+assert("literal quantity keeps speedFrom", clearedQty.motion.speedFrom === "pace");
+const rebound = setMotion(clearedQty, { quantityFrom: "dots" });
+assert("rebinding quantityFrom", rebound.motion.quantityFrom === "dots");
+const shown = normalizeMotion(rebound.motion);
+assert("normalize keeps binding", shown.quantityFrom === "dots");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

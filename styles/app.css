@@ -1044,3 +1044,13 @@ body {
   min-width: 0;
   max-width: 100%;
 }
+
+.im-doc-ns {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.35rem;
+}
+
+.im-doc-ns .im-doc-help {
+  margin: 0;
+}

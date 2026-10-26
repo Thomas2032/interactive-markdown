@@ -151,6 +151,17 @@ function downloadMd(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+/** @type {string} Currently selected example filename, or "". */
+let currentExample = "";
+
+function syncExampleSelect(name) {
+  currentExample = name || "";
+  if (!exampleSelect) return;
+  const wanted = currentExample;
+  const has = wanted && [...exampleSelect.options].some((o) => o.value === wanted);
+  exampleSelect.value = has ? wanted : "";
+}
+
 async function loadExample(name) {
   if (!name) return;
   try {
@@ -162,6 +173,7 @@ async function loadExample(name) {
     try {
       localStorage.setItem(STORAGE_KEY, text);
     } catch (_) {}
+    syncExampleSelect(name);
     renderNow();
     setStatus(`Loaded examples/${name}`);
   } catch (err) {
@@ -227,6 +239,7 @@ function init() {
     try {
       localStorage.setItem(STORAGE_KEY, text);
     } catch (_) {}
+    syncExampleSelect("");
     renderNow();
     setStatus(`Opened ${file.name}`);
     fileInput.value = "";
@@ -245,6 +258,7 @@ function init() {
       localStorage.removeItem(STORAGE_KEY);
     } catch (_) {}
     dirty = false;
+    syncExampleSelect("");
     renderNow();
     setStatus("Reset to default sample");
   });
@@ -252,7 +266,7 @@ function init() {
   exampleSelect?.addEventListener("change", () => {
     const v = exampleSelect.value;
     if (v) loadExample(v);
-    exampleSelect.value = "";
+    else syncExampleSelect("");
   });
 
   window.addEventListener("keydown", (e) => {
