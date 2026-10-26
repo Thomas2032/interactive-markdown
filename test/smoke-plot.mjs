@@ -1,6 +1,6 @@
 import { parseHTML, DOMParser } from "linkedom";
 import { parseIvm } from "../src/parse-ivm.js";
-import { buildPlotSvg, normalizePlot, serializePlotLines, ticks, DEFAULT_WIDTH, DEFAULT_HEIGHT } from "../src/plot.js";
+import { buildPlotSvg, normalizePlot, serializePlotLines, ticks, hitTestPlot, DEFAULT_WIDTH, DEFAULT_HEIGHT } from "../src/plot.js";
 import { mountIvm, resetNamespaces } from "../src/render.js";
 import { parseDocument, serializeDocument, serializeFigure, updatePlotAxis, updatePlotSeries } from "../src/document.js";
 
@@ -260,6 +260,28 @@ assert("serialize parametric", /x = cos\(t\)/.test(serText) && /y = sin\(t\)/.te
 assert("serialize polar", /r = theta/.test(serText) && /theta = /.test(serText));
 const round = parseIvm(serText);
 assert("serialize round-trip kinds", round.plot?.series[0]?.kind === "parametric" && round.plot?.series[1]?.kind === "polar");
+
+
+const hitModel = normalizePlot({
+  width: 400,
+  height: 240,
+  x: { min: -1, max: 1, step: 0.5 },
+  y: { min: -1, max: 1, step: 0.5 },
+  series: [{ id: "line", label: "y=x", kind: "y", expression: "x", stroke: "#111" }],
+});
+const layoutHit = hitTestPlot(hitModel, {}, 200, 120, { maxDist: 80 });
+assert("hitTest finds series", !!layoutHit && layoutHit.series === "y=x", JSON.stringify(layoutHit));
+assert("hitTest has coords", layoutHit && Number.isFinite(layoutHit.x) && Number.isFinite(layoutHit.y));
+
+const tipHost = document.createElement("div");
+document.body.appendChild(tipHost);
+resetNamespaces();
+const tipMount = mountIvm(
+  tipHost,
+  `@plot 400x240\n@axis x: -1..1\n@axis y: -1..1\n@series s stroke=#00f "demo"\n  y = x\n`
+);
+assert("plot mounts for tooltip", !!tipHost.querySelector(".im-svg-host"));
+tipMount.destroy();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -15,8 +15,10 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
-- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **log/symlog** axes, **legends**, **parametric/polar** series, and optional **SVG overlay**
-- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename; edits write back into the fence)
+- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **log/symlog** axes, **legends**, **parametric/polar** series, optional **SVG overlay**, and **hover tooltips**
+- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**; edits write back into the fence)
+- **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
+- **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
 - SVG sanitizer (strips scripts, event handlers, external hrefs)
@@ -82,8 +84,8 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@grid on\|off` | Plot grid toggle |
 | `@graph` | Start an editable directed graph. This is the first directive in that fence |
 | `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
-| `@edge from -> to` | Directed edge. Add `from=top\|right\|bottom\|left` and `to=top\|right\|bottom\|left` to choose the sides. Defaults are `from=right` and `to=left` |
-| `@animate` | Play marching dashes and traveling dots on the graph canvas. Options: `path=ortho\|straight\|curve`, `quantity=N` (1–12), `direction=forward\|reverse`, `speed=seconds` |
+| `@edge from -> to` | Directed edge (self-edges allowed). Sides: `top\|right\|bottom\|left\|top-left\|top-right\|bottom-left\|bottom-right` (aliases `tl\|tr\|bl\|br`). Defaults `from=right`, `to=left` |
+| `@animate` | Marching dashes / traveling dots. Options: `path=ortho\|straight\|curve`, `quantity=N\|name`, `direction=forward\|reverse`, `speed=seconds\|name` |
 
 ### Defaults (omit when unchanged)
 
@@ -106,14 +108,17 @@ Humans and docs should use the long forms. Generators may emit short aliases; bo
 
 ### Graph
 
-A fence that starts with `@graph` is a node-and-edge diagram. The preview is the editor: drag a node, drag a port on any side onto another node, double-click a label to rename, and press Delete to remove the selection. `@animate` runs the motion on that same canvas. Path, quantity, direction, and speed are edited there and written back onto the `@animate` line. Each committed edit replaces that fence in the source. Do not mix `@svg` or controls into the same fence.
+A `@graph` fence is a node-and-edge diagram. Drag a node, drag a port (cardinal or corner) onto another node — including the same node for a self-edge — double-click a label to rename, and press Delete to remove the selection. `@slider` / `@timer` / `@let` may share the fence; bind `@animate quantity=name` and `speed=name` to those controls. Path, direction, and literal quantity/speed still edit on the canvas. Do not mix `@svg` or `@plot` into a graph fence.
 
 ````markdown
 ```ivm
+@slider dots: 1..6 = 2 "Dots"
 @graph
+@animate path=curve quantity=dots speed=2.4
 @node start: "Start" x=40 y=48 kind=input
 @node step: "Step" x=280 y=48
 @edge start -> step
+@edge step -> step from=bottom-left to=top-left
 ```
 ````
 
@@ -194,7 +199,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/agent-loop.md`](examples/agent-loop.md) — agent loop drawn as an animated graph
 - [`examples/graph.md`](examples/graph.md) — directed graph you can edit in the preview
 - [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
-- [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
+- [`examples/p0-demo / p1-demo.md`](examples/p0-demo / p1-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
 
 ## Project layout
 

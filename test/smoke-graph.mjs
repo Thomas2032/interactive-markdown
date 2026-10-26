@@ -56,9 +56,11 @@ const missing = parseIvm(`@graph\n@node a: "A" x=1 y=2\n@edge a -> b\n`);
 assert("missing endpoint", missing.errors.some((e) => /unknown node/.test(e)));
 assert("omits bad edge", missing.graph.edges.length === 0);
 
-const mixed = parseIvm(`@graph\n@slider amp: 0..1 = 0\n`);
-assert("slider rejected in graph", mixed.errors.some((e) => /Not allowed inside @graph/.test(e)));
-assert("no slider control", mixed.controls.length === 0);
+const mixed = parseIvm(`@slider amp: 0..1 = 0.5\n@graph\n@node a: "A" x=1 y=2\n@animate quantity=amp speed=pace\n@slider pace: 0.5..5 = 2\n`);
+assert("controls allowed with graph", mixed.errors.length === 0, JSON.stringify(mixed.errors));
+assert("graph+slider controls", mixed.controls.length === 2 && mixed.controls[0].name === "amp");
+assert("animate quantityFrom", mixed.graph.motion.quantityFrom === "amp");
+assert("animate speedFrom", mixed.graph.motion.speedFrom === "pace");
 
 const unknown = parseIvm(`@graph\n@node a: "A" x=1 y=2 kind=nope\n`);
 assert("unknown kind errors", unknown.errors.some((e) => /unknown kind/.test(e)));
@@ -125,8 +127,22 @@ assert(
   "parse vertical edge",
   verticalAgain.graph.edges[0].fromSide === "bottom" && verticalAgain.graph.edges[0].toSide === "top"
 );
-const self = addEdge(base, "trigger", "trigger");
-assert("self edge rejected", !self.ok && self.reason === "self");
+const self = addEdge(base, "trigger", "trigger", { fromSide: "bottom-left", toSide: "top-left" });
+assert("self edge ok", self.ok && self.model.edges.length === 1 && self.model.edges[0].from === "trigger");
+assert("self edge corner ports", self.model.edges[0].fromSide === "bottom-left" && self.model.edges[0].toSide === "top-left");
+assert(
+  "serialize self edge",
+  serializeGraph(self.model).includes("@edge trigger -> trigger from=bottom-left to=top-left")
+);
+const selfAgain = parseIvm(serializeGraph(self.model));
+assert(
+  "parse self edge",
+  selfAgain.errors.length === 0 &&
+    selfAgain.graph.edges[0].from === selfAgain.graph.edges[0].to &&
+    selfAgain.graph.edges[0].fromSide === "bottom-left"
+);
+const corner = addEdge(base, "trigger", "think", { fromSide: "tr", toSide: "bl" });
+assert("corner alias normalize", corner.ok && corner.model.edges[0].fromSide === "top-right" && corner.model.edges[0].toSide === "bottom-left");
 
 const removed = removeSelection(first.model, { type: "node", id: "trigger" });
 assert("delete node drops edges", removed.nodes.length === 1 && removed.edges.length === 0);
@@ -184,7 +200,7 @@ assert("traveling dot", !!motionHost.querySelector("animateMotion"));
 assert("node pulse stage", motionHost.querySelector(".im-graph-stage")?.classList.contains("is-animated"));
 assert("edge svg has no scene viewBox", !motionHost.querySelector(".im-graph-edges")?.getAttribute("viewBox"));
 assert("arrow glyph viewBox stays", motionHost.querySelector("marker")?.getAttribute("viewBox") === "0 0 10 10");
-assert("four ports", motionHost.querySelector(".im-graph-node")?.querySelectorAll(".im-graph-port").length === 4);
+assert("eight ports", motionHost.querySelector(".im-graph-node")?.querySelectorAll(".im-graph-port").length === 8);
 assert("top port", !!motionHost.querySelector(".im-graph-port-top"));
 assert("bottom port", !!motionHost.querySelector(".im-graph-port-bottom"));
 const qty = motionHost.querySelector('[data-motion="quantity"]');
@@ -244,5 +260,21 @@ const replacedSecond = replaceIvmFence(src, 1, "@slider r: 1..9 = 3\n@svg\n<svg/
 assert("second fence replaced", replacedSecond.includes("1..9"));
 assert("first fence kept", replacedSecond.includes('@node a: "A"'));
 
+
+const portsHost = document.createElement("div");
+document.body.appendChild(portsHost);
+const portsMounted = mountGraphEditor(portsHost, {
+  nodes: [{ id: "loop", label: "Loop", x: 40, y: 40, kind: "action" }],
+  edges: [{ from: "loop", to: "loop", fromSide: "bottom-left", toSide: "top-left" }],
+  animated: true,
+  motion: { path: "curve", quantity: 2, direction: "forward", speed: 2, quantityFrom: "dots", speedFrom: "pace" },
+});
+assert("corner ports in DOM", portsHost.querySelectorAll(".im-graph-port").length === 8);
+assert("self edge drawn", !!portsHost.querySelector(".im-graph-edge"));
+portsMounted.setLiveMotion({ quantity: 5, speed: 1.2 });
+assert("live motion dots", portsHost.querySelectorAll("animateMotion").length === 5);
+portsMounted.destroy();
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
+

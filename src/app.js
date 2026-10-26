@@ -26,6 +26,10 @@ let previewMount = null;
 let graphMount = null;
 let debounceTimer = 0;
 let dirty = false;
+/** Shared control values across Preview and Graph editor mounts. */
+const sharedEnvStore = new Map();
+/** Shared @ns maps across Preview and Graph editor mounts. */
+const sharedNamespaces = new Map();
 
 function setStatus(msg) {
   if (statusEl) statusEl.textContent = msg;
@@ -52,6 +56,8 @@ function renderPreview() {
     previewMount = null;
   }
   previewMount = renderDocument(preview, editor.value, {
+    envStore: sharedEnvStore,
+    namespaces: sharedNamespaces,
     onGraphChange(fenceIndex, body) {
       editor.value = replaceIvmFence(editor.value, fenceIndex, body);
       persistDraft();
@@ -68,6 +74,8 @@ function refreshGraphEditor() {
     graphMount = null;
   }
   graphMount = mountDocumentEditor(graphEditorEl, editor.value, {
+    envStore: sharedEnvStore,
+    namespaces: sharedNamespaces,
     onChange(markdown) {
       editor.value = markdown;
       persistDraft();

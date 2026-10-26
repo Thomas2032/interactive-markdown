@@ -20,14 +20,17 @@
  *     r = … / theta = min..max       (polar; free var `theta`)
  *   @grid on|off
  *   @graph
- *   @animate [path=ortho|straight|curve] [quantity=N] [direction=forward|reverse] [speed=seconds]
+ *   @animate [path=ortho|straight|curve] [quantity=N|name] [direction=forward|reverse] [speed=seconds|name]
  *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
- *   @edge from -> to [from=right|left|top|bottom] [to=left|right|top|bottom]
+ *   @edge from -> to [from=side] [to=side]
+ *     sides: left|right|top|bottom|top-left|top-right|bottom-left|bottom-right
+ *            (aliases: tl|tr|bl|br)
  *
  * Defaults: step=1, timer loop=true, speed=30. Omitted "Label" → UI shows name.
  * `@svg 200x80` stores width/height so the renderer can wrap non-root markup.
  * `@plot` builds a chart; optional trailing `@svg` is overlay chrome in the plot viewBox.
- * `@plot` / `@svg` stay exclusive of `@graph`.
+ * `@plot` / `@svg` stay exclusive of `@graph`. Controls (@slider/@timer/@let/…) may share a `@graph` fence.
+ * `@animate` quantity/speed accept a number or a control name bound from the fence env.
  */
 
 /**
@@ -44,10 +47,10 @@
  *   expression?: string,
  *   units?: 'deg'|'rad',
  * }} Control
- * @typedef {"left"|"right"|"top"|"bottom"} GraphSide
+ * @typedef {"left"|"right"|"top"|"bottom"|"top-left"|"top-right"|"bottom-left"|"bottom-right"} GraphSide
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
- * @typedef {{ path: string, quantity: number, direction: string, speed: number }} GraphMotion
+ * @typedef {{ path: string, quantity: number, direction: string, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
  * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
  * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog', linthresh?: number }} PlotAxis
  * @typedef {{
@@ -89,6 +92,33 @@
 
 const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
 
+const GRAPH_SIDE_ALIASES = Object.freeze({
+  left: "left",
+  right: "right",
+  top: "top",
+  bottom: "bottom",
+  "top-left": "top-left",
+  tl: "top-left",
+  "top-right": "top-right",
+  tr: "top-right",
+  "bottom-left": "bottom-left",
+  bl: "bottom-left",
+  "bottom-right": "bottom-right",
+  br: "bottom-right",
+});
+
+/**
+ * @param {string} raw
+ * @returns {GraphSide | null}
+ */
+function parseGraphSide(raw) {
+  const key = String(raw || "").toLowerCase();
+  return Object.prototype.hasOwnProperty.call(GRAPH_SIDE_ALIASES, key)
+    ? /** @type {GraphSide} */ (GRAPH_SIDE_ALIASES[key])
+    : null;
+}
+
+
 const KIND_ALIASES = Object.freeze({
   s: "slider",
   slider: "slider",
@@ -127,16 +157,24 @@ function readAnimate(line, errors) {
         errors.push(`@animate: unknown path ${raw}`);
       } else motion.path = value;
     } else if (key === "quantity") {
-      const n = Number(value);
-      if (!Number.isInteger(n) || n < 1 || n > 12) errors.push("@animate: quantity must be 1..12");
-      else motion.quantity = n;
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) && Number.isNaN(Number(raw))) {
+        motion.quantityFrom = raw;
+      } else {
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 1 || n > 12) errors.push("@animate: quantity must be 1..12 or a control name");
+        else motion.quantity = n;
+      }
     } else if (key === "direction") {
       if (value !== "forward" && value !== "reverse") errors.push(`@animate: unknown direction ${raw}`);
       else motion.direction = value;
     } else if (key === "speed") {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0.2 || n > 30) errors.push("@animate: speed must be seconds from 0.2 to 30");
-      else motion.speed = Math.round(n * 10) / 10;
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) && Number.isNaN(Number(raw))) {
+        motion.speedFrom = raw;
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0.2 || n > 30) errors.push("@animate: speed must be seconds from 0.2 to 30 or a control name");
+        else motion.speed = Math.round(n * 10) / 10;
+      }
     }
   }
   return motion;
@@ -541,11 +579,6 @@ export function parseIvm(body) {
           i++;
           continue;
         }
-        if (from === to) {
-          errors.push(`@edge ${from} -> ${to}: a node cannot connect to itself`);
-          i++;
-          continue;
-        }
         if (!graph.nodes.some((n) => n.id === from) || !graph.nodes.some((n) => n.id === to)) {
           errors.push(`@edge ${from} -> ${to}: unknown node`);
           i++;
@@ -562,13 +595,18 @@ export function parseIvm(body) {
         let sideError = false;
         if (tail) {
           for (const part of tail.split(/\s+/)) {
-            const flag = part.match(/^(from|to)=(left|right|top|bottom)$/i);
+            const flag = part.match(/^(from|to)=(\S+)$/i);
             if (!flag) {
               errors.push(`@edge ${from} -> ${to}: unknown ${part}`);
               sideError = true;
               continue;
             }
-            const side = /** @type {GraphSide} */ (flag[2].toLowerCase());
+            const side = parseGraphSide(flag[2]);
+            if (!side) {
+              errors.push(`@edge ${from} -> ${to}: unknown side ${flag[2]}`);
+              sideError = true;
+              continue;
+            }
             if (flag[1].toLowerCase() === "from") edge.fromSide = side;
             else edge.toSide = side;
           }
@@ -592,14 +630,16 @@ export function parseIvm(body) {
       continue;
     }
 
-    if (graph) {
-      errors.push(`Not allowed inside @graph: ${line}`);
-      i++;
-      continue;
-    }
+    // Controls and @ns may share a @graph fence; @svg/@plot stay exclusive (checked above).
+    // Fall through so @slider/@timer/@let/@ns parse below. Reject leftover graph junk after controls.
 
     // @svg [WxH] — remainder of fence is SVG markup (overlay when @plot is set)
     if (/^@svg\b/i.test(line)) {
+      if (graph) {
+        errors.push("@svg cannot mix with @graph");
+        i++;
+        continue;
+      }
       const after = line.replace(/^@svg\b/i, "").trim();
       const size = after.match(/^(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*$/);
       if (size) {
@@ -722,7 +762,8 @@ export function parseIvm(body) {
       }
     }
 
-    errors.push(`Unrecognized line: ${line}`);
+    if (graph) errors.push(`Not allowed inside @graph: ${line}`);
+    else errors.push(`Unrecognized line: ${line}`);
     i++;
   }
 

@@ -76,7 +76,17 @@ export function serializeDocument(blocks) {
  */
 export function serializeFigure(block) {
   if (!block) return "\n";
-  if (block.type === "graph") return serializeGraph(block.model || { nodes: [], edges: [] });
+  if (block.type === "graph") {
+    const lines = [];
+    if (block.namespace) lines.push(`@ns ${block.namespace}`);
+    for (const control of block.controls || []) {
+      const line = serializeControl(control);
+      if (line) lines.push(line);
+    }
+    const graphBody = serializeGraph(block.model || { nodes: [], edges: [] }).replace(/\s*$/, "");
+    lines.push(graphBody);
+    return lines.join("\n").replace(/\s*$/, "\n");
+  }
   if (block.type === "plot") {
     const rebuilt = [];
     if (block.namespace) rebuilt.push(`@ns ${block.namespace}`);
@@ -146,7 +156,9 @@ export function insertFeature(doc, feature, options = {}) {
     place({
       id: nid(),
       type: "graph",
-      model: { nodes: [], edges: [], animated: true },
+      namespace: null,
+      controls: [],
+      model: { nodes: [], edges: [], animated: feature === "animated" },
     });
   } else if (feature === "shape") {
     const shape = defaultShape(options.shapeType || "rect");
@@ -226,7 +238,7 @@ export function updateControl(doc, blockId, index, patch) {
   return {
     blocks: (doc?.blocks || []).map((b) => {
       const copy = cloneBlock(b);
-      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot") && copy.controls[index]) {
+      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot" || copy.type === "graph") && copy.controls?.[index]) {
         copy.controls[index] = cloneControl({ ...copy.controls[index], ...patch });
       }
       return copy;
@@ -244,7 +256,7 @@ export function removeControl(doc, blockId, index) {
   return {
     blocks: (doc?.blocks || []).map((b) => {
       const copy = cloneBlock(b);
-      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot")) {
+      if (copy.id === blockId && (copy.type === "figure" || copy.type === "plot" || copy.type === "graph")) {
         copy.controls = copy.controls.filter((_, i) => i !== index);
       }
       return copy;
@@ -416,7 +428,7 @@ function copyPlotModel(plot) {
  */
 function findFigure(blocks, id) {
   if (!id) return null;
-  const block = blocks.find((b) => b.id === id && (b.type === "figure" || b.type === "plot"));
+  const block = blocks.find((b) => b.id === id && (b.type === "figure" || b.type === "plot" || b.type === "graph"));
   return block || null;
 }
 
@@ -536,6 +548,8 @@ function blockFromIvm(body) {
     return {
       id: nid(),
       type: "graph",
+      namespace: parsed.namespace,
+      controls: parsed.controls.map(cloneControl),
       model: copyGraphModel(parsed.graph),
     };
   }
@@ -759,7 +773,11 @@ function cloneBlock(block) {
   if (!block) return block;
   if (block.type === "bullets") return { ...block, items: (block.items || []).slice() };
   if (block.type === "graph") {
-    return { ...block, model: copyGraphModel(block.model) };
+    return {
+      ...block,
+      controls: (block.controls || []).map(cloneControl),
+      model: copyGraphModel(block.model),
+    };
   }
   if (block.type === "plot") {
     return {

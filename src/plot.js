@@ -694,7 +694,124 @@ function escapeText(value) {
  * @param {Partial<PlotModel>} plot
  * @returns {string[]}
  */
+
+/**
+ * Layout metrics used by the renderer for hover hit-testing.
+ * @param {Partial<PlotModel>} plot
+ * @returns {{ model: PlotModel, margin: { top: number, right: number, bottom: number, left: number }, plotW: number, plotH: number, xToPx: (x: number) => number, yToPx: (y: number) => number, pxToX: (px: number) => number, pxToY: (py: number) => number }}
+ */
+export function plotLayout(plot) {
+  const model = normalizePlot(plot);
+  const W = model.width;
+  const H = model.height;
+  const m = { ...MARGIN };
+  let plotW = Math.max(10, W - m.left - m.right);
+  let plotH = Math.max(10, H - m.top - m.bottom);
+  const xProj = makeProjector(model.x);
+  const yProj = makeProjector(model.y);
+  if (
+    model.lockAspect &&
+    model.x.scale === "linear" &&
+    model.y.scale === "linear"
+  ) {
+    const xSpan = Math.abs(xProj.forward(model.x.max) - xProj.forward(model.x.min)) || 1;
+    const ySpan = Math.abs(yProj.forward(model.y.max) - yProj.forward(model.y.min)) || 1;
+    const unit = Math.min(plotW / xSpan, plotH / ySpan);
+    const usedW = unit * xSpan;
+    const usedH = unit * ySpan;
+    m.left += (plotW - usedW) / 2;
+    m.right += (plotW - usedW) / 2;
+    m.top += (plotH - usedH) / 2;
+    m.bottom += (plotH - usedH) / 2;
+    plotW = usedW;
+    plotH = usedH;
+  }
+  const xToPx = (x) => {
+    const u0 = xProj.forward(model.x.min);
+    const u1 = xProj.forward(model.x.max);
+    const u = xProj.forward(x);
+    return m.left + ((u - u0) / (u1 - u0 || 1)) * plotW;
+  };
+  const yToPx = (y) => {
+    const u0 = yProj.forward(model.y.min);
+    const u1 = yProj.forward(model.y.max);
+    const u = yProj.forward(y);
+    return m.top + plotH - ((u - u0) / (u1 - u0 || 1)) * plotH;
+  };
+  const pxToX = (px) => {
+    const u0 = xProj.forward(model.x.min);
+    const u1 = xProj.forward(model.x.max);
+    const t = (px - m.left) / (plotW || 1);
+    return inverseProject(model.x, u0 + t * (u1 - u0));
+  };
+  const pxToY = (py) => {
+    const u0 = yProj.forward(model.y.min);
+    const u1 = yProj.forward(model.y.max);
+    const t = (m.top + plotH - py) / (plotH || 1);
+    return inverseProject(model.y, u0 + t * (u1 - u0));
+  };
+  return { model, margin: m, plotW, plotH, xToPx, yToPx, pxToX, pxToY };
+}
+
+/**
+ * Nearest sampled point under a pointer in SVG viewBox coordinates.
+ * @param {Partial<PlotModel>} plot
+ * @param {Record<string, unknown>} env
+ * @param {number} svgX
+ * @param {number} svgY
+ * @param {{ maxDist?: number }} [options]
+ * @returns {{ series: string, x: number, y: number, px: number, py: number, stroke: string } | null}
+ */
+export function hitTestPlot(plot, env, svgX, svgY, options = {}) {
+  const layout = plotLayout(plot);
+  const { model, margin: m, plotW, plotH, xToPx, yToPx } = layout;
+  if (
+    svgX < m.left - 4 ||
+    svgX > m.left + plotW + 4 ||
+    svgY < m.top - 4 ||
+    svgY > m.top + plotH + 4
+  ) {
+    return null;
+  }
+  const maxDist = options.maxDist ?? 14;
+  /** @type {{ series: string, x: number, y: number, px: number, py: number, stroke: string, dist: number } | null} */
+  let best = null;
+  const errors = [];
+  for (const series of model.series) {
+    const sampled = sampleSeries(series, model, env, errors);
+    const label = seriesLabel(series) || series.id || "series";
+    for (const p of sampled.points) {
+      const px = xToPx(p.x);
+      const py = yToPx(p.y);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+      const dist = Math.hypot(px - svgX, py - svgY);
+      if (dist > maxDist) continue;
+      if (!best || dist < best.dist) {
+        best = {
+          series: label,
+          x: p.x,
+          y: p.y,
+          px,
+          py,
+          stroke: series.stroke || DEFAULT_STROKE,
+          dist,
+        };
+      }
+    }
+  }
+  if (!best) return null;
+  return {
+    series: best.series,
+    x: best.x,
+    y: best.y,
+    px: best.px,
+    py: best.py,
+    stroke: best.stroke,
+  };
+}
+
 export function serializePlotLines(plot) {
+
   const model = normalizePlot(plot);
   /** @type {string[]} */
   const lines = [];

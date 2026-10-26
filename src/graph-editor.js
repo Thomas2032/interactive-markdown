@@ -8,20 +8,43 @@ export const NODE_W = 168;
 export const NODE_H = 56;
 
 export const GRAPH_KINDS = Object.freeze(["action", "input", "output", "decision"]);
-export const GRAPH_SIDES = Object.freeze(["top", "right", "bottom", "left"]);
+export const GRAPH_SIDES = Object.freeze([
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+]);
 export const GRAPH_PATHS = Object.freeze(["ortho", "straight", "curve"]);
 
 const KIND_SET = new Set(GRAPH_KINDS);
 const SIDE_SET = new Set(GRAPH_SIDES);
+const SIDE_ALIASES = Object.freeze({
+  left: "left",
+  right: "right",
+  top: "top",
+  bottom: "bottom",
+  "top-left": "top-left",
+  tl: "top-left",
+  "top-right": "top-right",
+  tr: "top-right",
+  "bottom-left": "bottom-left",
+  bl: "bottom-left",
+  "bottom-right": "bottom-right",
+  br: "bottom-right",
+});
 const DEFAULT_SPEED = 2.8;
 
 /**
- * @typedef {"left"|"right"|"top"|"bottom"} GraphSide
+ * @typedef {"left"|"right"|"top"|"bottom"|"top-left"|"top-right"|"bottom-left"|"bottom-right"} GraphSide
  * @typedef {"ortho"|"straight"|"curve"} GraphPath
  * @typedef {"forward"|"reverse"} GraphDirection
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
- * @typedef {{ path: GraphPath, quantity: number, direction: GraphDirection, speed: number }} GraphMotion
+ * @typedef {{ path: GraphPath, quantity: number, direction: GraphDirection, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
  * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
  * @typedef {{ type: 'node', id: string } | { type: 'edge', index: number }} GraphSelection
  */
@@ -38,8 +61,9 @@ export function normalizeKind(kind) {
  * @returns {GraphSide}
  */
 export function normalizeSide(side, fallback) {
-  const s = String(side || fallback).toLowerCase();
-  return SIDE_SET.has(s) ? /** @type {GraphSide} */ (s) : fallback;
+  const raw = String(side || fallback).toLowerCase();
+  const mapped = Object.prototype.hasOwnProperty.call(SIDE_ALIASES, raw) ? SIDE_ALIASES[raw] : raw;
+  return SIDE_SET.has(mapped) ? /** @type {GraphSide} */ (mapped) : fallback;
 }
 
 /**
@@ -55,12 +79,20 @@ export function normalizeMotion(motion) {
   let speed = Number(motion?.speed ?? DEFAULT_SPEED);
   if (!Number.isFinite(speed)) speed = DEFAULT_SPEED;
   speed = Math.min(30, Math.max(0.2, Math.round(speed * 10) / 10));
-  return {
+  /** @type {GraphMotion} */
+  const next = {
     path: path === "straight" || path === "curve" ? /** @type {GraphPath} */ (path) : "ortho",
     quantity,
     direction: direction === "reverse" ? "reverse" : "forward",
     speed,
   };
+  if (motion?.quantityFrom && /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(motion.quantityFrom))) {
+    next.quantityFrom = String(motion.quantityFrom);
+  }
+  if (motion?.speedFrom && /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(motion.speedFrom))) {
+    next.speedFrom = String(motion.speedFrom);
+  }
+  return next;
 }
 
 function clamp(n, lo, hi) {
@@ -125,7 +157,9 @@ export function serializeGraph(model) {
  */
 function serializeAnimate(motion) {
   const next = normalizeMotion(motion);
-  return `@animate path=${next.path} quantity=${next.quantity} direction=${next.direction} speed=${next.speed}`;
+  const quantity = next.quantityFrom || String(next.quantity);
+  const speed = next.speedFrom || String(next.speed);
+  return `@animate path=${next.path} quantity=${quantity} direction=${next.direction} speed=${speed}`;
 }
 
 /**
@@ -209,7 +243,7 @@ export function setNodeKind(model, id, kind) {
  * @returns {{ model: GraphModel, ok: boolean, reason?: string }}
  */
 export function addEdge(model, from, to, sides = {}) {
-  if (!from || !to || from === to) return { model, ok: false, reason: "self" };
+  if (!from || !to) return { model, ok: false, reason: "missing" };
   if (!model.nodes.some((n) => n.id === from) || !model.nodes.some((n) => n.id === to)) {
     return { model, ok: false, reason: "missing" };
   }
@@ -281,7 +315,7 @@ function cloneModel(model) {
 /** @param {GraphModel} model @param {GraphModel} next */
 function carry(model, next) {
   if (model && model.animated) next.animated = true;
-  if (next.motion == null && model && model.motion) next.motion = { ...model.motion };
+  if (next.motion == null && model && model.motion) next.motion = normalizeMotion(model.motion);
   return next;
 }
 
@@ -322,9 +356,14 @@ function edgePath(from, to) {
  * @param {GraphSide} side
  */
 function sideAnchor(node, side) {
-  if (side === "left") return { x: node.x, y: node.y + NODE_H / 2, dx: -1, dy: 0 };
-  if (side === "top") return { x: node.x + NODE_W / 2, y: node.y, dx: 0, dy: -1 };
-  if (side === "bottom") return { x: node.x + NODE_W / 2, y: node.y + NODE_H, dx: 0, dy: 1 };
+  const s = normalizeSide(side, "right");
+  if (s === "left") return { x: node.x, y: node.y + NODE_H / 2, dx: -1, dy: 0 };
+  if (s === "top") return { x: node.x + NODE_W / 2, y: node.y, dx: 0, dy: -1 };
+  if (s === "bottom") return { x: node.x + NODE_W / 2, y: node.y + NODE_H, dx: 0, dy: 1 };
+  if (s === "top-left") return { x: node.x, y: node.y, dx: -0.7, dy: -0.7 };
+  if (s === "top-right") return { x: node.x + NODE_W, y: node.y, dx: 0.7, dy: -0.7 };
+  if (s === "bottom-left") return { x: node.x, y: node.y + NODE_H, dx: -0.7, dy: 0.7 };
+  if (s === "bottom-right") return { x: node.x + NODE_W, y: node.y + NODE_H, dx: 0.7, dy: 0.7 };
   return { x: node.x + NODE_W, y: node.y + NODE_H / 2, dx: 1, dy: 0 };
 }
 
@@ -355,11 +394,57 @@ function px(value) {
  */
 function edgeRoute(from, to, edge, style) {
   const fromSide = normalizeSide(edge?.fromSide, "right");
-  const toSide = normalizeSide(edge?.toSide, "left");
+  const toSide = normalizeSide(edge?.toSide, from === to ? "top" : "left");
+  if (from === to || from.id === to.id) {
+    return selfRoute(from, fromSide, toSide, style);
+  }
   if (style === "ortho" && fromSide === "right" && toSide === "left") {
     return { d: edgePath(from, to), tip: edgeTip(to) };
   }
   return sideRoute(from, to, fromSide, toSide, style);
+}
+
+/**
+ * Loop path for a self-edge.
+ * @param {GraphNode} node
+ * @param {GraphSide} fromSide
+ * @param {GraphSide} toSide
+ * @param {GraphPath} style
+ */
+function selfRoute(node, fromSide, toSide, style) {
+  const a = sideAnchor(node, fromSide);
+  const b = sideAnchor(node, toSide);
+  const leave = { x: a.x + a.dx * 28, y: a.y + a.dy * 28 };
+  const approach = { x: b.x + b.dx * 28, y: b.y + b.dy * 28 };
+  const tipEnd = { x: b.x + b.dx * 6, y: b.y + b.dy * 6 };
+  const tip = `M ${px(approach.x)} ${px(approach.y)} L ${px(tipEnd.x)} ${px(tipEnd.y)}`;
+  const mid = {
+    x: (a.x + b.x) / 2 + (a.dx + b.dx) * 36,
+    y: (a.y + b.y) / 2 + (a.dy + b.dy) * 36,
+  };
+  // If ports coincide, push the loop further out along the outward normal.
+  if (Math.hypot(a.x - b.x, a.y - b.y) < 4) {
+    mid.x = a.x + a.dx * 72;
+    mid.y = a.y + a.dy * 72;
+  }
+  if (style === "straight") {
+    return {
+      d: `M ${px(a.x)} ${px(a.y)} L ${px(leave.x)} ${px(leave.y)} L ${px(mid.x)} ${px(mid.y)} L ${px(approach.x)} ${px(approach.y)}`,
+      tip,
+    };
+  }
+  const c1 = { x: a.x + a.dx * 64, y: a.y + a.dy * 64 };
+  const c2 = { x: b.x + b.dx * 64, y: b.y + b.dy * 64 };
+  if (style === "curve" || style === "ortho") {
+    return {
+      d: `M ${px(a.x)} ${px(a.y)} C ${px(c1.x)} ${px(c1.y)} ${px(mid.x)} ${px(mid.y)} ${px(mid.x)} ${px(mid.y)} S ${px(c2.x)} ${px(c2.y)} ${px(approach.x)} ${px(approach.y)}`,
+      tip,
+    };
+  }
+  return {
+    d: `M ${px(a.x)} ${px(a.y)} L ${px(leave.x)} ${px(leave.y)} L ${px(mid.x)} ${px(mid.y)} L ${px(approach.x)} ${px(approach.y)}`,
+    tip,
+  };
 }
 
 /**
@@ -422,6 +507,8 @@ export function mountGraphEditor(container, initial, options = {}) {
   const markerId = "im-graph-arrow-" + ++mountSeq;
   /** @type {GraphModel} */
   let model = cloneModel(initial);
+  /** @type {Partial<GraphMotion> | null} */
+  let liveMotion = null;
   /** @type {GraphSelection | null} */
   let selection = null;
   let pendingKind = "action";
@@ -653,9 +740,16 @@ export function mountGraphEditor(container, initial, options = {}) {
     return { w, h };
   }
 
+  function resolvedMotion() {
+    if (!model.animated && !liveMotion) return null;
+    const base = normalizeMotion(model.motion);
+    if (!liveMotion) return model.animated ? base : null;
+    return normalizeMotion({ ...base, ...liveMotion });
+  }
+
   function paintEdges() {
     while (edgeLayer.firstChild) edgeLayer.removeChild(edgeLayer.firstChild);
-    const motion = model.animated ? normalizeMotion(model.motion) : null;
+    const motion = resolvedMotion();
     model.edges.forEach((e, index) => {
       const from = model.nodes.find((n) => n.id === e.from);
       const to = model.nodes.find((n) => n.id === e.to);
@@ -754,7 +848,7 @@ export function mountGraphEditor(container, initial, options = {}) {
     const size = contentSize();
     stage.style.width = size.w + "px";
     stage.style.height = size.h + "px";
-    stage.classList.toggle("is-animated", !!model.animated);
+    stage.classList.toggle("is-animated", !!resolvedMotion());
     empty.hidden = model.nodes.length > 0;
     for (const el of stage.querySelectorAll(".im-graph-node")) el.remove();
     for (const n of model.nodes) stage.appendChild(renderNode(n));
@@ -1048,7 +1142,6 @@ export function mountGraphEditor(container, initial, options = {}) {
       if (!result.ok) {
         paint();
         if (result.reason === "duplicate") flash("Those nodes are already connected");
-        else if (result.reason === "self") flash("A node cannot connect to itself");
         return;
       }
       model = result.model;
@@ -1112,6 +1205,14 @@ export function mountGraphEditor(container, initial, options = {}) {
     },
     getModel() {
       return cloneModel(model);
+    },
+    /**
+     * Overlay live quantity/speed (from fence controls) without rewriting the source model.
+     * @param {Partial<GraphMotion> | null} patch
+     */
+    setLiveMotion(patch) {
+      liveMotion = patch ? { ...patch } : null;
+      if (!dead) paint();
     },
   };
 }
