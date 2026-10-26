@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
-  "version": "0.6.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, graphs, @fn macros, arrays/map/reduce, angle mode, timeline phases, and local asset allowlist",
+  "version": "0.7.0",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, graphs, editor polish (picker sync, @ns help, copy fence / reset env), @fn macros, arrays, angle mode, phases, local assets",
   "main": "./src/index.js",
   "directories": {
     "example": "examples",

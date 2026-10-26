@@ -244,6 +244,12 @@ export function mountDocumentEditor(container, source, options = {}) {
       actionButton("move", "Down", { delta: "1", disabled: index < 0 || index >= doc.blocks.length - 1 }),
       actionButton("remove-block", "Remove", null)
     );
+    if (block.type === "figure" || block.type === "graph" || block.type === "plot") {
+      row.append(
+        actionButton("copy-fence", "Copy fence", null),
+        actionButton("reset-env", "Reset env", null)
+      );
+    }
     if (block.type === "graph" && !block.model?.animated) {
       row.append(actionButton("add-animation", "Add animation", null));
     }
@@ -311,9 +317,7 @@ export function mountDocumentEditor(container, source, options = {}) {
       return box;
     }
     if (block.type === "graph") {
-      const ns = input("text", block.namespace || "");
-      ns.dataset.field = "namespace";
-      box.appendChild(field("Shared name", ns));
+      box.appendChild(renderNamespaceField(block));
       if (block.model?.animated) {
         const note = docEl.createElement("p");
         note.className = "im-doc-help";
@@ -330,9 +334,7 @@ export function mountDocumentEditor(container, source, options = {}) {
       return box;
     }
     if (block.type === "plot") {
-      const ns = input("text", block.namespace || "");
-      ns.dataset.field = "namespace";
-      box.appendChild(field("Shared name", ns));
+      box.appendChild(renderNamespaceField(block));
       const grid = input("checkbox", "");
       grid.checked = block.plot?.grid !== false;
       grid.dataset.field = "plotGrid";
@@ -442,9 +444,7 @@ export function mountDocumentEditor(container, source, options = {}) {
       return box;
     }
     if (block.type === "figure") {
-      const ns = input("text", block.namespace || "");
-      ns.dataset.field = "namespace";
-      box.appendChild(field("Shared name", ns));
+      box.appendChild(renderNamespaceField(block));
       if (!block.customSvg) {
         const view = input("text", block.viewBox || "");
         view.dataset.field = "viewBox";
@@ -582,6 +582,71 @@ export function mountDocumentEditor(container, source, options = {}) {
     span.textContent = label;
     wrap.append(span, control);
     return wrap;
+  }
+
+  /**
+   * Namespace (@ns) field with short inspector help.
+   * @param {object} block
+   */
+  function renderNamespaceField(block) {
+    const wrap = docEl.createElement("div");
+    wrap.className = "im-doc-ns";
+    const ns = input("text", block.namespace || "");
+    ns.dataset.field = "namespace";
+    ns.placeholder = "e.g. shared";
+    ns.setAttribute("aria-label", "Namespace (@ns)");
+    wrap.appendChild(field("Namespace (@ns)", ns));
+    const help = docEl.createElement("p");
+    help.className = "im-doc-help";
+    help.textContent =
+      "Optional. Fences that share the same @ns name keep the same slider, timer, and toggle values across Preview and the Graph editor.";
+    wrap.appendChild(help);
+    return wrap;
+  }
+
+  /**
+   * Build a full ```ivm fence for clipboard copy.
+   * @param {object} block
+   */
+  function fenceTextFor(block) {
+    const body = serializeFigure(block).replace(/\s*$/, "\n");
+    return "```ivm\n" + body + "```\n";
+  }
+
+  /**
+   * Reset live env for one figure/graph/plot (and its @ns map if set).
+   * @param {object} block
+   */
+  function resetEnvFor(block) {
+    if (options.envStore) {
+      const key = envKeyFor(block);
+      options.envStore.delete(key);
+    }
+    if (block.namespace && options.namespaces) {
+      options.namespaces.delete(block.namespace);
+    }
+  }
+
+  /** @param {string} text */
+  function fallbackCopy(text) {
+    const ta = docEl.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    docEl.body.appendChild(ta);
+    try {
+      if (typeof ta.select === "function") ta.select();
+      else if (typeof ta.setSelectionRange === "function") ta.setSelectionRange(0, text.length);
+    } catch (_) {
+      /* linkedom / headless */
+    }
+    try {
+      docEl.execCommand?.("copy");
+    } catch (_) {
+      /* ignore */
+    }
+    ta.remove();
   }
 
   /**
@@ -853,7 +918,17 @@ export function mountDocumentEditor(container, source, options = {}) {
     const actionEl = target.closest("[data-action]");
     if (actionEl && !actionEl.closest(".im-graph")) {
       const action = actionEl.dataset.action || "";
-      if (action === "select" || action === "move" || action === "remove-block" || action === "remove-control" || action === "remove-shape" || action === "add-animation" || action === "remove-animation") {
+      if (
+        action === "select" ||
+        action === "move" ||
+        action === "remove-block" ||
+        action === "remove-control" ||
+        action === "remove-shape" ||
+        action === "add-animation" ||
+        action === "remove-animation" ||
+        action === "copy-fence" ||
+        action === "reset-env"
+      ) {
         event.preventDefault();
         runAction(actionEl);
       }
@@ -959,6 +1034,58 @@ export function mountDocumentEditor(container, source, options = {}) {
     }
     if (action === "remove-animation") {
       setGraphAnimated(id, false);
+      return;
+    }
+    if (action === "copy-fence") {
+      const block = doc.blocks.find((b) => b.id === id);
+      if (!block || (block.type !== "figure" && block.type !== "graph" && block.type !== "plot")) return;
+      const text = fenceTextFor(block);
+      const done = (ok) => options.onStatus?.(ok ? "Copied IVM fence" : "Copy failed");
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => done(true)).catch(() => {
+          fallbackCopy(text);
+          done(true);
+        });
+      } else {
+        fallbackCopy(text);
+        done(true);
+      }
+      return;
+    }
+    if (action === "reset-env") {
+      const block = doc.blocks.find((b) => b.id === id);
+      if (!block || (block.type !== "figure" && block.type !== "graph" && block.type !== "plot")) return;
+      resetEnvFor(block);
+      // Remount so controls snap back to fence defaults
+      const prev = mounts.get(id);
+      if (prev) {
+        prev.destroy();
+        mounts.delete(id);
+      }
+      const host = blocksEl.querySelector(`.im-doc-block[data-id="${id}"] .im-doc-live-host`);
+      if (host) {
+        host.innerHTML = "";
+        mountLive(block, host);
+      }
+      options.onStatus?.("Env reset to fence defaults");
+      // Also refresh sibling mounts that share the same @ns
+      if (block.namespace) {
+        for (const other of doc.blocks) {
+          if (other.id === id) continue;
+          if (other.type !== "figure" && other.type !== "graph" && other.type !== "plot") continue;
+          if (other.namespace !== block.namespace) continue;
+          const otherPrev = mounts.get(other.id);
+          if (otherPrev) {
+            otherPrev.destroy();
+            mounts.delete(other.id);
+          }
+          const otherHost = blocksEl.querySelector(`.im-doc-block[data-id="${other.id}"] .im-doc-live-host`);
+          if (otherHost) {
+            otherHost.innerHTML = "";
+            mountLive(other, otherHost);
+          }
+        }
+      }
       return;
     }
     const index = Number(actionEl.dataset.index);

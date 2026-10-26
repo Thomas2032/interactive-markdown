@@ -201,5 +201,82 @@ assert("animated round trip stays a graph", mergedAgain.blocks.every((b) => b.ty
 assert("animated flag stays", mergedAgain.blocks[0].model.animated === true);
 assert("animated nodes stay", mergedAgain.blocks[0].model.nodes.length === 1 && mergedAgain.blocks[0].model.nodes[0].id === "a");
 
+// --- P4 editor polish ---
+const p4 = parseDocument(read("p4-demo.md"));
+assert("p4 has graph", p4.blocks.some((b) => b.type === "graph"));
+assert(
+  "p4 graph namespace",
+  p4.blocks.some((b) => b.type === "graph" && b.namespace === "demo")
+);
+assert(
+  "p4 figure namespace",
+  p4.blocks.some((b) => b.type === "figure" && b.namespace === "demo")
+);
+const p4Graph = p4.blocks.find((b) => b.type === "graph");
+assert(
+  "p4 animate binds",
+  p4Graph?.model?.motion?.quantityFrom === "dots" && p4Graph?.model?.motion?.speedFrom === "pace"
+);
+
+const p4Host = document.getElementById("host");
+p4Host.innerHTML = "";
+const statuses = [];
+const envStore = new Map();
+const namespaces = new Map();
+const p4Mount = mountDocumentEditor(p4Host, read("p4-demo.md"), {
+  envStore,
+  namespaces,
+  onStatus(msg) {
+    statuses.push(msg);
+  },
+});
+assert("doc editor mounts", !!p4Host.querySelector(".im-doc"));
+
+function findGraphBlock() {
+  return [...p4Host.querySelectorAll(".im-doc-block")].find((el) =>
+    el.querySelector(".im-doc-kind")?.textContent?.toLowerCase().includes("graph")
+  );
+}
+
+const graphSection = findGraphBlock();
+assert("graph block present", !!graphSection);
+assert("copy fence button", !!graphSection.querySelector('[data-action="copy-fence"]'));
+assert("reset env button", !!graphSection.querySelector('[data-action="reset-env"]'));
+
+// select graph to open inspector (paint rebuilds DOM — re-query afterward)
+graphSection.querySelector('[data-action="select"]')?.click();
+const graphSelected = findGraphBlock();
+assert("graph selected", !!graphSelected && graphSelected.classList.contains("is-selected"));
+const nsLabel = [...p4Host.querySelectorAll(".im-doc-field span")].find((s) =>
+  /Namespace \(@ns\)/.test(s.textContent || "")
+);
+assert("namespace label", !!nsLabel);
+assert("namespace help", !!p4Host.querySelector(".im-doc-ns .im-doc-help"));
+
+// seed env then reset — remount restores fence defaults into the store
+envStore.set("ivm:0", { scale: 1.8 });
+envStore.set("ivm:1", { dots: 5, pace: 4 });
+namespaces.set("demo", { scale: 1.8, dots: 5, pace: 4 });
+graphSelected.querySelector('[data-action="reset-env"]')?.click();
+assert("reset status", statuses.some((s) => /Env reset/.test(s)), statuses.join(" | "));
+const nsAfter = namespaces.get("demo") || {};
+assert(
+  "reset restores ns defaults",
+  Number(nsAfter.dots) === 2 && Number(nsAfter.pace) === 2.4,
+  JSON.stringify(nsAfter)
+);
+const graphEnv = envStore.get("ivm:1") || {};
+assert(
+  "reset restores graph env defaults",
+  Number(graphEnv.dots) === 2 && Number(graphEnv.pace) === 2.4,
+  JSON.stringify(graphEnv)
+);
+
+findGraphBlock()?.querySelector('[data-action="copy-fence"]')?.click();
+assert("copy status", statuses.some((s) => /Copied IVM fence/.test(s)), statuses.join(" | "));
+
+p4Mount.destroy();
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

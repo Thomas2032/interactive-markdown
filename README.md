@@ -21,6 +21,7 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**; edits write back into the fence)
 - **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
 - **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
+- **Editor polish**: Examples picker stays on the loaded file; Graph editor blocks offer **Copy fence** / **Reset env**; inspector labels **Namespace (@ns)** with short help
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
 - SVG sanitizer (strips scripts, event handlers, remote hrefs; allows same-origin / relative paths and `data:` images/fonts)
@@ -48,7 +49,9 @@ npx serve .
 
 ## Graph editor tab
 
-The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, XY plots, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes. A shape attribute can be a number or `{{name}}`. The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path. Each change rewrites the source. The right pane is the rendered preview.
+The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, XY plots, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes — including **Namespace (@ns)** (fences with the same name share control values). A shape attribute can be a number or `{{name}}`. Figure / plot / graph blocks also expose **Copy fence** (clipboard) and **Reset env** (snap controls back to fence defaults, including shared `@ns` state). The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path; when quantity/speed are bound to slider names, the motion toolbar shows those names. Each change rewrites the source. The right pane is the rendered preview.
+
+The toolbar **Examples…** menu keeps the selected file name after load (it no longer snaps back to the placeholder).
 
 ## IVM dialect (quick reference)
 
@@ -212,6 +215,7 @@ Load from the toolbar **Examples…** menu, or open the files directly:
 - [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
 - [`examples/p1-demo.md`](examples/p1-demo.md) — graph controls, self-edges, corner ports, shared env, plot tooltips
 - [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
+- [`examples/p4-demo.md`](examples/p4-demo.md) — `@ns` sharing, picker sync, Copy fence / Reset env
 
 ## Project layout
 

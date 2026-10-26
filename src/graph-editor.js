@@ -271,7 +271,23 @@ export function addEdge(model, from, to, sides = {}) {
  * @returns {GraphModel}
  */
 export function setMotion(model, patch) {
-  const motion = normalizeMotion({ ...normalizeMotion(model.motion), ...patch });
+  const base = { ...normalizeMotion(model.motion) };
+  // Editing a literal quantity/speed clears any env binding for that field.
+  if (Object.prototype.hasOwnProperty.call(patch, "quantity") && !Object.prototype.hasOwnProperty.call(patch, "quantityFrom")) {
+    delete base.quantityFrom;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "speed") && !Object.prototype.hasOwnProperty.call(patch, "speedFrom")) {
+    delete base.speedFrom;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "quantityFrom") && patch.quantityFrom == null) {
+    delete base.quantityFrom;
+    delete patch.quantityFrom;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "speedFrom") && patch.speedFrom == null) {
+    delete base.speedFrom;
+    delete patch.speedFrom;
+  }
+  const motion = normalizeMotion({ ...base, ...patch });
   const next = carry(model, {
     nodes: model.nodes.map((n) => ({ ...n })),
     edges: model.edges.map((e) => ({ ...e })),
@@ -669,11 +685,13 @@ export function mountGraphEditor(container, initial, options = {}) {
     wrap.className = "im-graph-kind-label";
     wrap.appendChild(doc.createTextNode(label));
     const input = doc.createElement("input");
-    input.type = "number";
+    // text so bound control names (e.g. dots) can display; numeric values still accepted on change
+    input.type = "text";
+    input.inputMode = "decimal";
     input.dataset.motion = name;
-    input.min = String(min);
-    input.max = String(max);
-    input.step = String(step);
+    input.dataset.min = String(min);
+    input.dataset.max = String(max);
+    input.dataset.step = String(step);
     input.setAttribute("aria-label", label);
     wrap.appendChild(input);
     return { wrap, input };
@@ -723,10 +741,27 @@ export function mountGraphEditor(container, initial, options = {}) {
     motionBar.hidden = !model.animated;
     if (model.animated) {
       const motion = normalizeMotion(model.motion);
+      const live = liveMotion ? normalizeMotion({ ...motion, ...liveMotion }) : motion;
       setSelect(pathCtl.select, motion.path);
       setSelect(dirCtl.select, motion.direction);
-      if (doc.activeElement !== qtyCtl.input) qtyCtl.input.value = String(motion.quantity);
-      if (doc.activeElement !== speedCtl.input) speedCtl.input.value = String(motion.speed);
+      if (doc.activeElement !== qtyCtl.input) {
+        if (motion.quantityFrom) {
+          qtyCtl.input.value = motion.quantityFrom;
+          qtyCtl.input.title = `Bound to control "${motion.quantityFrom}" (live ${live.quantity})`;
+        } else {
+          qtyCtl.input.value = String(live.quantity);
+          qtyCtl.input.title = "Traveling dots (1–12)";
+        }
+      }
+      if (doc.activeElement !== speedCtl.input) {
+        if (motion.speedFrom) {
+          speedCtl.input.value = motion.speedFrom;
+          speedCtl.input.title = `Bound to control "${motion.speedFrom}" (live ${live.speed}s)`;
+        } else {
+          speedCtl.input.value = String(live.speed);
+          speedCtl.input.title = "Seconds per lap";
+        }
+      }
     }
   }
 
@@ -916,10 +951,20 @@ export function mountGraphEditor(container, initial, options = {}) {
     apply(setMotion(model, { direction }));
   });
   qtyCtl.input.addEventListener("change", () => {
-    apply(setMotion(model, { quantity: Number(qtyCtl.input.value) }));
+    const raw = String(qtyCtl.input.value || "").trim();
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) {
+      apply(setMotion(model, { quantityFrom: raw }));
+      return;
+    }
+    apply(setMotion(model, { quantity: Number(raw) }));
   });
   speedCtl.input.addEventListener("change", () => {
-    apply(setMotion(model, { speed: Number(speedCtl.input.value) }));
+    const raw = String(speedCtl.input.value || "").trim();
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) {
+      apply(setMotion(model, { speedFrom: raw }));
+      return;
+    }
+    apply(setMotion(model, { speed: Number(raw) }));
   });
 
   kindSelect.addEventListener("change", () => {
@@ -1212,7 +1257,10 @@ export function mountGraphEditor(container, initial, options = {}) {
      */
     setLiveMotion(patch) {
       liveMotion = patch ? { ...patch } : null;
-      if (!dead) paint();
+      if (!dead) {
+        paint();
+        syncChrome();
+      }
     },
   };
 }
