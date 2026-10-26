@@ -95,6 +95,11 @@ export function serializeFigure(block) {
       if (line) rebuilt.push(line);
     }
     rebuilt.push(...series);
+    const overlay = block.overlaySvg != null ? String(block.overlaySvg).trim() : "";
+    if (overlay) {
+      rebuilt.push("@svg");
+      rebuilt.push(overlay);
+    }
     return rebuilt.join("\n").replace(/\s*$/, "\n");
   }
   if (block.type !== "figure") return "\n";
@@ -396,6 +401,8 @@ function copyPlotModel(plot) {
     width: model.width,
     height: model.height,
     grid: model.grid,
+    legend: model.legend,
+    lockAspect: model.lockAspect,
     samples: model.samples,
     x: { ...model.x },
     y: { ...model.y },
@@ -539,6 +546,7 @@ function blockFromIvm(body) {
       namespace: parsed.namespace,
       controls: parsed.controls.map(cloneControl),
       plot: copyPlotModel(parsed.plot),
+      overlaySvg: parsed.templateSvg != null ? String(parsed.templateSvg) : null,
     };
   }
   const raw = parsed.templateSvg;
