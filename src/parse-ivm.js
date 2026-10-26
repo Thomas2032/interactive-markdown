@@ -10,6 +10,9 @@
  *   @toggle | @b  name: true|false ["Label"]
  *   @let    | @l  name = expression
  *   @calc         name = expression   (alias of @let; prefer @let in docs/generators)
+ *   @fn     | @f  name(param, …) = expression   (pure macro; no side effects)
+ *   @angle  deg|rad                 (fence-wide trig mode; sin/cos use this unit)
+ *   @phase  name: min..max          (named timeline span for inPhase/phaseT/phaseAt)
  *   @svg [WxH]
  *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
  *   @plot [WxH] [grid|nogrid]
@@ -78,9 +81,14 @@
  *   y: PlotAxis|null,
  *   series: PlotSeries[],
  * }} PlotModel
+ * @typedef {{ name: string, params: string[], expression: string }} IvmFn
+ * @typedef {{ name: string, min: number, max: number }} IvmPhase
  * @typedef {{
  *   namespace: string|null,
  *   controls: Control[],
+ *   fns: IvmFn[],
+ *   angleMode: 'deg'|'rad'|null,
+ *   phases: IvmPhase[],
  *   templateSvg: string|null,
  *   svgWidth: number|null,
  *   svgHeight: number|null,
@@ -266,6 +274,12 @@ export function parseIvm(body) {
   const errors = [];
   /** @type {Control[]} */
   const controls = [];
+  /** @type {IvmFn[]} */
+  const fns = [];
+  /** @type {'deg'|'rad'|null} */
+  let angleMode = null;
+  /** @type {IvmPhase[]} */
+  const phases = [];
   let namespace = null;
   let templateSvg = null;
   /** @type {number|null} */
@@ -676,6 +690,76 @@ export function parseIvm(body) {
       }
     }
 
+    // @angle deg|rad  (aliases: @mode deg|rad)
+    {
+      const m = line.match(/^@(?:angle|mode)\s+(deg|rad)\s*$/i);
+      if (m) {
+        angleMode = /** @type {'deg'|'rad'} */ (m[1].toLowerCase());
+        i++;
+        continue;
+      }
+    }
+
+    // @phase name: min..max
+    {
+      const m = line.match(
+        /^@phase\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*$/i
+      );
+      if (m) {
+        const name = m[1];
+        const min = Number(m[2]);
+        const max = Number(m[3]);
+        if (!Number.isFinite(min) || !Number.isFinite(max)) {
+          errors.push(`@phase ${name}: invalid range`);
+        } else if (phases.some((p) => p.name === name)) {
+          errors.push(`@phase ${name}: duplicate phase`);
+        } else {
+          phases.push({ name, min, max });
+        }
+        i++;
+        continue;
+      }
+    }
+
+    // @fn / @f name(params) = expression
+    {
+      const m = line.match(
+        /^@(fn|f)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*=\s*(.+)$/i
+      );
+      if (m) {
+        const name = m[2];
+        const paramsRaw = m[3].trim();
+        const expression = m[4].trim();
+        /** @type {string[]} */
+        const params = [];
+        if (paramsRaw) {
+          for (const part of paramsRaw.split(",")) {
+            const p = part.trim();
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(p)) {
+              errors.push(`@fn ${name}: bad param ${part.trim()}`);
+              params.length = 0;
+              break;
+            }
+            if (params.includes(p)) {
+              errors.push(`@fn ${name}: duplicate param ${p}`);
+              params.length = 0;
+              break;
+            }
+            params.push(p);
+          }
+        }
+        if (fns.some((f) => f.name === name)) {
+          errors.push(`@fn ${name}: duplicate function`);
+        } else if (expression) {
+          fns.push({ name, params, expression });
+        } else {
+          errors.push(`@fn ${name}: missing body`);
+        }
+        i++;
+        continue;
+      }
+    }
+
     // @let / @l / @calc name = expression
     {
       const m = line.match(/^@(let|l|calc)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/i);
@@ -767,7 +851,7 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, templateSvg, svgWidth, svgHeight, graph, plot, errors };
+  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, errors };
 }
 
 /**

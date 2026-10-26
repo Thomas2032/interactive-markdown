@@ -1,6 +1,9 @@
 /**
  * Safe expression evaluator for Interactive Markdown.
  * Whitelist-only recursive-descent parser. NEVER uses eval or Function.
+ *
+ * Supports arrays, map/reduce helpers, user @fn macros (via options.functions),
+ * fence angleMode (deg|rad) for sin/cos/tan family, and @phase helpers.
  */
 
 const CONSTANTS = Object.freeze({
@@ -11,43 +14,159 @@ const CONSTANTS = Object.freeze({
   false: false,
 });
 
-const FUNCTIONS = Object.freeze({
-  abs: Math.abs,
-  sqrt: Math.sqrt,
-  pow: Math.pow,
-  exp: Math.exp,
-  ln: Math.log,
-  log: (x, base) => (base === undefined ? Math.log10(x) : Math.log(x) / Math.log(base)),
-  sin: Math.sin,
-  cos: Math.cos,
-  tan: Math.tan,
-  asin: Math.asin,
-  acos: Math.acos,
-  atan: Math.atan,
-  atan2: Math.atan2,
-  round: (x, digits) => {
-    if (digits === undefined || digits === null) return Math.round(x);
-    const f = 10 ** digits;
-    return Math.round(x * f) / f;
-  },
-  floor: Math.floor,
-  ceil: Math.ceil,
-  trunc: Math.trunc,
-  sign: Math.sign,
-  min: Math.min,
-  max: Math.max,
-  clamp: (x, lo, hi) => Math.min(Math.max(x, lo), hi),
-  mod: (a, b) => ((a % b) + b) % b,
-  lerp: (a, b, t) => a + (b - a) * t,
-  deg: (r) => (r * 180) / Math.PI,
-  rad: (d) => (d * Math.PI) / 180,
-  sind: (d) => Math.sin((d * Math.PI) / 180),
-  cosd: (d) => Math.cos((d * Math.PI) / 180),
-  tand: (d) => Math.tan((d * Math.PI) / 180),
-  asind: (x) => (Math.asin(x) * 180) / Math.PI,
-  acosd: (x) => (Math.acos(x) * 180) / Math.PI,
-  atand: (x) => (Math.atan(x) * 180) / Math.PI,
-});
+const MAX_FN_DEPTH = 32;
+const MAX_ARRAY = 4096;
+
+/**
+ * @param {'deg'|'rad'|null|undefined} angleMode
+ * @param {{ name: string, min: number, max: number }[]} phases
+ */
+function buildFunctions(angleMode, phases) {
+  const degMode = angleMode === "deg";
+  const toRad = (x) => (degMode ? (Number(x) * Math.PI) / 180 : Number(x));
+  const fromRad = (x) => (degMode ? (Number(x) * 180) / Math.PI : Number(x));
+
+  /** @param {unknown} a */
+  const asArray = (a) => {
+    if (!Array.isArray(a)) throw new Error("Expected array");
+    return a;
+  };
+
+  const phaseList = Array.isArray(phases) ? phases : [];
+
+  /** @param {number} t @param {string} name */
+  const findPhase = (t, name) => {
+    const key = String(name);
+    return phaseList.find((p) => p.name === key) || null;
+  };
+
+  return Object.freeze({
+    abs: Math.abs,
+    sqrt: Math.sqrt,
+    pow: Math.pow,
+    exp: Math.exp,
+    ln: Math.log,
+    log: (x, base) => (base === undefined ? Math.log10(x) : Math.log(x) / Math.log(base)),
+    sin: (x) => Math.sin(toRad(x)),
+    cos: (x) => Math.cos(toRad(x)),
+    tan: (x) => Math.tan(toRad(x)),
+    asin: (x) => fromRad(Math.asin(x)),
+    acos: (x) => fromRad(Math.acos(x)),
+    atan: (x) => fromRad(Math.atan(x)),
+    atan2: (y, x) => fromRad(Math.atan2(y, x)),
+    round: (x, digits) => {
+      if (digits === undefined || digits === null) return Math.round(x);
+      const f = 10 ** digits;
+      return Math.round(x * f) / f;
+    },
+    floor: Math.floor,
+    ceil: Math.ceil,
+    trunc: Math.trunc,
+    sign: Math.sign,
+    min: Math.min,
+    max: Math.max,
+    clamp: (x, lo, hi) => Math.min(Math.max(x, lo), hi),
+    mod: (a, b) => ((a % b) + b) % b,
+    lerp: (a, b, t) => a + (b - a) * t,
+    deg: (r) => (r * 180) / Math.PI,
+    rad: (d) => (d * Math.PI) / 180,
+    // Always degrees, regardless of angleMode
+    sind: (d) => Math.sin((d * Math.PI) / 180),
+    cosd: (d) => Math.cos((d * Math.PI) / 180),
+    tand: (d) => Math.tan((d * Math.PI) / 180),
+    asind: (x) => (Math.asin(x) * 180) / Math.PI,
+    acosd: (x) => (Math.acos(x) * 180) / Math.PI,
+    atand: (x) => (Math.atan(x) * 180) / Math.PI,
+
+    // Array helpers
+    len: (a) => asArray(a).length,
+    nth: (a, i) => {
+      const arr = asArray(a);
+      const idx = Math.trunc(Number(i));
+      if (idx < 0 || idx >= arr.length) throw new Error(`nth: index ${idx} out of range`);
+      return arr[idx];
+    },
+    first: (a) => {
+      const arr = asArray(a);
+      if (!arr.length) throw new Error("first: empty array");
+      return arr[0];
+    },
+    last: (a) => {
+      const arr = asArray(a);
+      if (!arr.length) throw new Error("last: empty array");
+      return arr[arr.length - 1];
+    },
+    sum: (a) => asArray(a).reduce((s, v) => s + Number(v), 0),
+    mean: (a) => {
+      const arr = asArray(a);
+      if (!arr.length) return NaN;
+      return arr.reduce((s, v) => s + Number(v), 0) / arr.length;
+    },
+    join: (a, sep) => asArray(a).map((v) => formatValue(v)).join(sep === undefined ? "," : String(sep)),
+    range: (start, end, step) => {
+      const a = Number(start);
+      const b = Number(end);
+      let s = step === undefined || step === null ? 1 : Number(step);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(s) || s === 0) {
+        throw new Error("range: invalid bounds/step");
+      }
+      /** @type {number[]} */
+      const out = [];
+      if (s > 0) {
+        for (let x = a; x <= b + 1e-12; x += s) {
+          out.push(Math.round(x * 1e10) / 1e10);
+          if (out.length > MAX_ARRAY) throw new Error("range: too many elements");
+        }
+      } else {
+        for (let x = a; x >= b - 1e-12; x += s) {
+          out.push(Math.round(x * 1e10) / 1e10);
+          if (out.length > MAX_ARRAY) throw new Error("range: too many elements");
+        }
+      }
+      return out;
+    },
+    // points(xs, ys) → "x1,y1 x2,y2 …" for SVG polyline/polygon
+    points: (xs, ys) => {
+      const ax = asArray(xs);
+      const ay = asArray(ys);
+      const n = Math.min(ax.length, ay.length);
+      /** @type {string[]} */
+      const parts = [];
+      for (let i = 0; i < n; i++) {
+        parts.push(`${formatValue(ax[i])},${formatValue(ay[i])}`);
+      }
+      return parts.join(" ");
+    },
+
+    // Phase helpers (named ranges from @phase)
+    inPhase: (t, name) => {
+      const p = findPhase(t, name);
+      if (!p) return false;
+      const x = Number(t);
+      return Number.isFinite(x) && x >= p.min && x <= p.max;
+    },
+    phaseT: (t, name) => {
+      const p = findPhase(t, name);
+      if (!p) return 0;
+      const x = Number(t);
+      if (!Number.isFinite(x)) return 0;
+      const span = p.max - p.min;
+      if (span === 0) return x >= p.min ? 1 : 0;
+      if (x < p.min) return 0;
+      if (x > p.max) return 1;
+      return (x - p.min) / span;
+    },
+    phaseAt: (t) => {
+      const x = Number(t);
+      if (!Number.isFinite(x)) return "";
+      const hit = phaseList.find((p) => x >= p.min && x <= p.max);
+      return hit ? hit.name : "";
+    },
+  });
+}
+
+/** Default (rad) function table for introspection / tests. */
+const FUNCTIONS = buildFunctions("rad", []);
 
 function tokenize(input) {
   const tokens = [];
@@ -105,7 +224,6 @@ function tokenize(input) {
       continue;
     }
 
-    // Multi-char operators
     const two = s.slice(i, i + 2);
     if (
       two === "**" ||
@@ -121,7 +239,7 @@ function tokenize(input) {
       continue;
     }
 
-    if ("+-*/%^()<>,?:!".includes(c) || c === "<" || c === ">") {
+    if ("+-*/%^()<>,?:![]".includes(c) || c === "<" || c === ">") {
       tokens.push({ type: "op", value: c });
       i++;
       continue;
@@ -135,10 +253,26 @@ function tokenize(input) {
 }
 
 class Parser {
-  constructor(tokens, env) {
+  /**
+   * @param {ReturnType<typeof tokenize>} tokens
+   * @param {Record<string, unknown>} env
+   * @param {{
+   *   angleMode?: 'deg'|'rad'|null,
+   *   functions?: Record<string, { params: string[], expression: string }>,
+   *   phases?: { name: string, min: number, max: number }[],
+   *   depth?: number,
+   * }} options
+   */
+  constructor(tokens, env, options = {}) {
     this.tokens = tokens;
     this.pos = 0;
     this.env = env || {};
+    this.options = options || {};
+    this.angleMode = options.angleMode === "deg" ? "deg" : "rad";
+    this.userFns = options.functions || {};
+    this.phases = options.phases || [];
+    this.depth = options.depth || 0;
+    this.fns = buildFunctions(this.angleMode, this.phases);
   }
 
   peek() {
@@ -260,13 +394,118 @@ class Parser {
 
   parsePow() {
     let base = this.parsePrimary();
-    // right-associative: ^ and **
     const op = this.matchOp("^", "**");
     if (op) {
       const exp = this.parseUnary();
       return Math.pow(base, exp);
     }
     return base;
+  }
+
+  /**
+   * Mapper / reducer: bare fn name, string expr, or evaluated string.
+   * @returns {{ type: 'fn', name: string } | { type: 'expr', source: string }}
+   */
+  parseMapper() {
+    const t = this.peek();
+    if (t.type === "string") {
+      this.consume();
+      return { type: "expr", source: t.value };
+    }
+    if (t.type === "ident") {
+      const next = this.tokens[this.pos + 1];
+      if (!(next && next.type === "op" && next.value === "(")) {
+        this.consume();
+        return { type: "fn", name: t.value };
+      }
+    }
+    const v = this.parseTernary();
+    if (typeof v === "string") return { type: "expr", source: v };
+    throw new Error("map/reduce: mapper must be a function name or string expression");
+  }
+
+  /**
+   * @param {string} name
+   * @param {unknown[]} args
+   */
+  callNamed(name, args) {
+    if (Object.prototype.hasOwnProperty.call(this.fns, name) && name !== "map" && name !== "reduce") {
+      const fn = this.fns[name];
+      return fn(...args);
+    }
+    if (Object.prototype.hasOwnProperty.call(this.userFns, name)) {
+      if (this.depth >= MAX_FN_DEPTH) throw new Error(`Function recursion limit (${MAX_FN_DEPTH})`);
+      const ufn = this.userFns[name];
+      /** @type {Record<string, unknown>} */
+      const childEnv = Object.create(null);
+      Object.assign(childEnv, this.env);
+      for (let i = 0; i < ufn.params.length; i++) {
+        childEnv[ufn.params[i]] = args[i];
+      }
+      return evaluate(ufn.expression, childEnv, {
+        angleMode: this.angleMode,
+        functions: this.userFns,
+        phases: this.phases,
+        depth: this.depth + 1,
+      });
+    }
+    throw new Error(`Unknown function: ${name}`);
+  }
+
+  /**
+   * @param {unknown} arr
+   * @param {{ type: string, name?: string, source?: string }} mapper
+   */
+  applyMap(arr, mapper) {
+    if (!Array.isArray(arr)) throw new Error("map: first argument must be an array");
+    if (arr.length > MAX_ARRAY) throw new Error("map: array too large");
+    return arr.map((item, i) => {
+      if (mapper.type === "fn") {
+        return this.callNamed(/** @type {string} */ (mapper.name), [item]);
+      }
+      /** @type {Record<string, unknown>} */
+      const local = Object.create(null);
+      Object.assign(local, this.env);
+      local._ = item;
+      local.i = i;
+      return evaluate(/** @type {string} */ (mapper.source), local, {
+        angleMode: this.angleMode,
+        functions: this.userFns,
+        phases: this.phases,
+        depth: this.depth + 1,
+      });
+    });
+  }
+
+  /**
+   * @param {unknown} arr
+   * @param {{ type: string, name?: string, source?: string }} reducer
+   * @param {unknown} init
+   */
+  applyReduce(arr, reducer, init) {
+    if (!Array.isArray(arr)) throw new Error("reduce: first argument must be an array");
+    if (arr.length > MAX_ARRAY) throw new Error("reduce: array too large");
+    let acc = init;
+    for (let i = 0; i < arr.length; i++) {
+      const item = arr[i];
+      if (reducer.type === "fn") {
+        acc = this.callNamed(/** @type {string} */ (reducer.name), [acc, item]);
+      } else {
+        /** @type {Record<string, unknown>} */
+        const local = Object.create(null);
+        Object.assign(local, this.env);
+        local.acc = acc;
+        local._ = item;
+        local.i = i;
+        acc = evaluate(/** @type {string} */ (reducer.source), local, {
+          angleMode: this.angleMode,
+          functions: this.userFns,
+          phases: this.phases,
+          depth: this.depth + 1,
+        });
+      }
+    }
+    return acc;
   }
 
   parsePrimary() {
@@ -282,13 +521,45 @@ class Parser {
       return t.value;
     }
 
+    if (t.type === "op" && t.value === "[") {
+      this.consume();
+      /** @type {unknown[]} */
+      const items = [];
+      if (!(this.peek().type === "op" && this.peek().value === "]")) {
+        items.push(this.parseTernary());
+        while (this.matchOp(",")) {
+          items.push(this.parseTernary());
+        }
+      }
+      this.expectOp("]");
+      if (items.length > MAX_ARRAY) throw new Error("array literal too large");
+      return items;
+    }
+
     if (t.type === "ident") {
       this.consume();
       const name = t.value;
 
-      // function call
       if (this.peek().type === "op" && this.peek().value === "(") {
         this.consume();
+
+        if (name === "map") {
+          const arr = this.parseTernary();
+          this.expectOp(",");
+          const mapper = this.parseMapper();
+          this.expectOp(")");
+          return this.applyMap(arr, mapper);
+        }
+        if (name === "reduce") {
+          const arr = this.parseTernary();
+          this.expectOp(",");
+          const reducer = this.parseMapper();
+          this.expectOp(",");
+          const init = this.parseTernary();
+          this.expectOp(")");
+          return this.applyReduce(arr, reducer, init);
+        }
+
         const args = [];
         if (!(this.peek().type === "op" && this.peek().value === ")")) {
           args.push(this.parseTernary());
@@ -297,9 +568,7 @@ class Parser {
           }
         }
         this.expectOp(")");
-        const fn = FUNCTIONS[name];
-        if (!fn) throw new Error(`Unknown function: ${name}`);
-        return fn(...args);
+        return this.callNamed(name, args);
       }
 
       if (Object.prototype.hasOwnProperty.call(CONSTANTS, name)) {
@@ -326,11 +595,17 @@ class Parser {
  * Evaluate a whitelist expression against an environment of variables.
  * @param {string} source
  * @param {Record<string, unknown>} env
+ * @param {{
+ *   angleMode?: 'deg'|'rad'|null,
+ *   functions?: Record<string, { params: string[], expression: string }>,
+ *   phases?: { name: string, min: number, max: number }[],
+ *   depth?: number,
+ * }} [options]
  * @returns {unknown}
  */
-export function evaluate(source, env = {}) {
+export function evaluate(source, env = {}, options = {}) {
   const tokens = tokenize(source);
-  const parser = new Parser(tokens, env);
+  const parser = new Parser(tokens, env, options);
   return parser.parse();
 }
 
@@ -342,32 +617,31 @@ export function evaluate(source, env = {}) {
 export function formatValue(value) {
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return String(value);
-    // Trim floating noise while keeping useful precision
     const rounded = Math.round(value * 1e6) / 1e6;
     return String(rounded);
   }
   if (typeof value === "boolean") return value ? "true" : "false";
+  if (Array.isArray(value)) return value.map(formatValue).join(",");
   if (value == null) return "";
   return String(value);
 }
 
 /**
  * Replace {{expr}} placeholders in a string using the evaluator.
- * Double-brace form avoids clashing with lone { } in SVG path data.
- * Failed expressions stay as `{{…}}` and are pushed onto `errors` when provided.
  * @param {string} template
  * @param {Record<string, unknown>} env
  * @param {string[]} [errors]
+ * @param {Parameters<typeof evaluate>[2]} [options]
  * @returns {string}
  */
-export function substitute(template, env = {}, errors) {
+export function substitute(template, env = {}, errors, options = {}) {
   let out = "";
   let i = 0;
   const s = String(template);
 
   while (i < s.length) {
     if (s[i] === "{" && s[i + 1] === "{") {
-      let depth = 1; // counts {{ ... }} pairs via inner { } for nested exprs
+      let depth = 1;
       let j = i + 2;
       let inStr = null;
       while (j < s.length) {
@@ -396,7 +670,7 @@ export function substitute(template, env = {}, errors) {
           if (depth === 0) {
             const expr = s.slice(i + 2, j);
             try {
-              out += formatValue(evaluate(expr, env));
+              out += formatValue(evaluate(expr, env, options));
             } catch (err) {
               out += "{{" + expr + "}}";
               const msg = /** @type {Error} */ (err).message || String(err);
@@ -423,4 +697,4 @@ export function substitute(template, env = {}, errors) {
   return out;
 }
 
-export { CONSTANTS, FUNCTIONS };
+export { CONSTANTS, FUNCTIONS, buildFunctions };

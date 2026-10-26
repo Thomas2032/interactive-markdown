@@ -79,6 +79,7 @@ export function serializeFigure(block) {
   if (block.type === "graph") {
     const lines = [];
     if (block.namespace) lines.push(`@ns ${block.namespace}`);
+    lines.push(...serializeExprMeta(block));
     for (const control of block.controls || []) {
       const line = serializeControl(control);
       if (line) lines.push(line);
@@ -90,6 +91,7 @@ export function serializeFigure(block) {
   if (block.type === "plot") {
     const rebuilt = [];
     if (block.namespace) rebuilt.push(`@ns ${block.namespace}`);
+    rebuilt.push(...serializeExprMeta(block));
     const plotLines = serializePlotLines(normalizePlot(block.plot || {}));
     const preamble = [];
     const series = [];
@@ -115,6 +117,7 @@ export function serializeFigure(block) {
   if (block.type !== "figure") return "\n";
   const lines = [];
   if (block.namespace) lines.push(`@ns ${block.namespace}`);
+  lines.push(...serializeExprMeta(block));
   for (const control of block.controls || []) {
     const line = serializeControl(control);
     if (line) lines.push(line);
@@ -549,6 +552,7 @@ function blockFromIvm(body) {
       id: nid(),
       type: "graph",
       namespace: parsed.namespace,
+      ...copyExprMeta(parsed),
       controls: parsed.controls.map(cloneControl),
       model: copyGraphModel(parsed.graph),
     };
@@ -558,6 +562,7 @@ function blockFromIvm(body) {
       id: nid(),
       type: "plot",
       namespace: parsed.namespace,
+      ...copyExprMeta(parsed),
       controls: parsed.controls.map(cloneControl),
       plot: copyPlotModel(parsed.plot),
       overlaySvg: parsed.templateSvg != null ? String(parsed.templateSvg) : null,
@@ -576,6 +581,7 @@ function blockFromIvm(body) {
     id: nid(),
     type: "figure",
     namespace: parsed.namespace,
+    ...copyExprMeta(parsed),
     controls: parsed.controls.map(cloneControl),
     viewBox,
     shapes: custom ? null : shapes,
@@ -705,6 +711,44 @@ function serializeShape(shape) {
 /**
  * @param {object} control
  */
+
+/**
+ * @param {object} block
+ * @returns {string[]}
+ */
+function serializeExprMeta(block) {
+  /** @type {string[]} */
+  const lines = [];
+  if (block?.angleMode === "deg" || block?.angleMode === "rad") {
+    lines.push(`@angle ${block.angleMode}`);
+  }
+  for (const fn of block?.fns || []) {
+    if (!fn?.name) continue;
+    const params = (fn.params || []).join(", ");
+    lines.push(`@fn ${fn.name}(${params}) = ${fn.expression ?? "0"}`);
+  }
+  for (const phase of block?.phases || []) {
+    if (!phase?.name) continue;
+    lines.push(`@phase ${phase.name}: ${phase.min}..${phase.max}`);
+  }
+  return lines;
+}
+
+/**
+ * @param {import('./parse-ivm.js').IvmBlock | object} parsed
+ */
+function copyExprMeta(parsed) {
+  return {
+    angleMode: parsed?.angleMode === "deg" || parsed?.angleMode === "rad" ? parsed.angleMode : null,
+    fns: Array.isArray(parsed?.fns)
+      ? parsed.fns.map((f) => ({ name: f.name, params: [...(f.params || [])], expression: f.expression }))
+      : [],
+    phases: Array.isArray(parsed?.phases)
+      ? parsed.phases.map((p) => ({ name: p.name, min: p.min, max: p.max }))
+      : [],
+  };
+}
+
 function serializeControl(control) {
   if (!control || !control.name) return "";
   if (control.kind === "let") return `@let ${control.name} = ${control.expression ?? "0"}`;
@@ -769,12 +813,25 @@ function cloneControl(control) {
 /**
  * @param {object} block
  */
+function cloneExprMeta(block) {
+  return {
+    angleMode: block?.angleMode === "deg" || block?.angleMode === "rad" ? block.angleMode : block?.angleMode ?? null,
+    fns: Array.isArray(block?.fns)
+      ? block.fns.map((f) => ({ name: f.name, params: [...(f.params || [])], expression: f.expression }))
+      : [],
+    phases: Array.isArray(block?.phases)
+      ? block.phases.map((p) => ({ name: p.name, min: p.min, max: p.max }))
+      : [],
+  };
+}
+
 function cloneBlock(block) {
   if (!block) return block;
   if (block.type === "bullets") return { ...block, items: (block.items || []).slice() };
   if (block.type === "graph") {
     return {
       ...block,
+      ...cloneExprMeta(block),
       controls: (block.controls || []).map(cloneControl),
       model: copyGraphModel(block.model),
     };
@@ -782,6 +839,7 @@ function cloneBlock(block) {
   if (block.type === "plot") {
     return {
       ...block,
+      ...cloneExprMeta(block),
       controls: (block.controls || []).map(cloneControl),
       plot: copyPlotModel(block.plot),
     };
@@ -789,6 +847,7 @@ function cloneBlock(block) {
   if (block.type === "figure") {
     return {
       ...block,
+      ...cloneExprMeta(block),
       controls: (block.controls || []).map(cloneControl),
       shapes: block.shapes ? block.shapes.map((shape) => ({ type: shape.type, attrs: { ...shape.attrs } })) : null,
     };
