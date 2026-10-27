@@ -111,6 +111,8 @@ function renderNow() {
     console.error(err);
   }
   if (previewOk) setStatus(dirty ? "Edited · preview updated" : "Preview updated");
+  // Keep Examples… selection sticky across Preview/Graph remounts
+  if (currentExample) syncExampleSelect(currentExample);
 }
 
 function showEditorTab(name) {

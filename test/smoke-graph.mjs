@@ -292,6 +292,23 @@ assert("rebinding quantityFrom", rebound.motion.quantityFrom === "dots");
 const shown = normalizeMotion(rebound.motion);
 assert("normalize keeps binding", shown.quantityFrom === "dots");
 
+const laneBody = `
+@graph
+@lane fe: "Front" y=0 height=100 fill=#eff6ff
+@group api: "API"
+@node a: "A" x=40 y=20 lane=fe group=api
+@node b: "B" x=240 y=20 lane=fe group=api
+@edge a -> b
+`;
+const laneP = parseIvm(laneBody);
+assert("lane parse", laneP.errors.length === 0 && laneP.graph?.lanes?.length === 1, JSON.stringify(laneP.errors));
+assert("group parse", laneP.graph?.groups?.[0]?.id === "api");
+assert("node lane", laneP.graph?.nodes[0]?.lane === "fe");
+const laneSer = serializeGraph(laneP.graph);
+assert("serialize lane", /@lane fe:/.test(laneSer) && /lane=fe/.test(laneSer));
+assert("serialize group", /@group api:/.test(laneSer) && /group=api/.test(laneSer));
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 

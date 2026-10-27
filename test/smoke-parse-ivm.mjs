@@ -190,5 +190,12 @@ const badFn = parseIvm(`@fn sin(x) = x\n@svg\n<svg/>\n`);
 assert("duplicate builtin fn still parses", badFn.fns.some((f) => f.name === "sin"));
 
 
+const scrub = parseIvm(`@scrub t duration=4 selector=.ball
+@svg 10x10
+<svg/>
+`);
+assert("scrub directive", scrub.scrub?.name === "t" && scrub.scrub.selector === ".ball");
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

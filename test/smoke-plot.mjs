@@ -283,5 +283,40 @@ const tipMount = mountIvm(
 assert("plot mounts for tooltip", !!tipHost.querySelector(".im-svg-host"));
 tipMount.destroy();
 
+// --- P3: bar / scatter / categorical / dual / annotate / zoom ---
+const barBody = `
+@plot 480x280 zoom legend=top-left
+@axis x: cats=A,B,C
+@axis y: 0..100
+@axis y2: 0..10
+@series sales kind=bar fill=#7c3aed "Sales"
+  cats = A, B, C
+  y = [10, 20, 30]
+@series pts kind=scatter axis=y2 marker=diamond size=6 stroke=#db2777
+  x = [0, 1, 2]
+  y = [1, 4, 2]
+@annotate x=1 y=20 "peak"
+`;
+const barP = parseIvm(barBody);
+assert("bar parse errors", barP.errors.length === 0, JSON.stringify(barP.errors));
+assert("bar kind", barP.plot?.series[0]?.kind === "bar");
+assert("scatter kind", barP.plot?.series[1]?.kind === "scatter");
+assert("y2 axis", !!barP.plot?.y2);
+assert("zoom flag", barP.plot?.zoom === true);
+assert("legendPos", barP.plot?.legendPos === "top-left");
+assert("annotate", barP.plot?.annotations?.length === 1);
+const barErrs = [];
+const barSvg = buildPlotSvg(normalizePlot(barP.plot), {}, { errors: barErrs });
+assert("bar svg no errs", barErrs.length === 0, JSON.stringify(barErrs));
+assert("bar rects", (barSvg.match(/<rect /g) || []).length >= 3);
+assert("scatter markers", /im-plot-series/.test(barSvg));
+assert("dual y2", /im-plot-axes-y2/.test(barSvg));
+assert("annotate group", /im-plot-annotate/.test(barSvg) && /peak/.test(barSvg));
+const barSer = serializePlotLines(barP.plot);
+assert("serialize kind=bar", barSer.some((l) => /kind=bar/.test(l)));
+assert("serialize zoom", barSer[0].includes("zoom"));
+assert("serialize annotate", barSer.some((l) => /^@annotate\b/.test(l)));
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

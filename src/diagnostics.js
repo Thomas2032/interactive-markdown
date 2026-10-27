@@ -32,7 +32,12 @@ const DIRECTIVES = [
   "axis",
   "series",
   "grid",
+  "legend",
+  "annotate",
+  "scrub",
   "graph",
+  "lane",
+  "group",
   "node",
   "edge",
   "animate",
@@ -364,6 +369,75 @@ export function diagnoseFence(body, meta = {}) {
  * @param {string} markdown
  * @param {{ file?: string|null }} [meta]
  */
+
+/**
+ * Warn when @ns names across fences look like typos of each other (edit distance 1–2),
+ * or when a name is used once while a near-match is used elsewhere.
+ * @param {{ name: string, fence: number, line: number|null }[]} usages
+ * @returns {Diagnostic[]}
+ */
+export function scanNsTypos(usages) {
+  /** @type {Diagnostic[]} */
+  const out = [];
+  const byName = new Map();
+  for (const u of usages) {
+    const key = u.name;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(u);
+  }
+  const names = [...byName.keys()];
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const a = names[i];
+      const b = names[j];
+      if (a.toLowerCase() === b.toLowerCase() && a !== b) {
+        const ua = byName.get(a)[0];
+        out.push({
+          fence: ua.fence,
+          line: ua.line,
+          severity: "warning",
+          code: "ns-case",
+          message: `@ns "${a}" and @ns "${b}" differ only by letter case — namespaces are case-sensitive`,
+          hint: `use the same spelling in every fence that should share state`,
+        });
+        continue;
+      }
+      const dist = nsEditDistance(a, b);
+      const maxDist = Math.min(a.length, b.length) <= 4 ? 1 : 2;
+      if (dist > 0 && dist <= maxDist) {
+        const ua = byName.get(a)[0];
+        out.push({
+          fence: ua.fence,
+          line: ua.line,
+          severity: "warning",
+          code: "ns-typo",
+          message: `@ns "${a}" looks like a typo of @ns "${b}"`,
+          hint: `namespaces must match exactly to share controls; did you mean "${b}"?`,
+        });
+      }
+    }
+  }
+  // Orphan hint: single-use namespace with no near match — only flag if another ns exists and this is lonely? Skip.
+  return out;
+}
+
+/** @param {string} a @param {string} b */
+function nsEditDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 99;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
 export function diagnoseMarkdown(markdown, meta = {}) {
   const segments = splitIvmFences(markdown);
   /** @type {Diagnostic[]} */
@@ -373,6 +447,9 @@ export function diagnoseMarkdown(markdown, meta = {}) {
   let fenceIndex = 0;
   /** @type {ReturnType<typeof diagnoseFence>[]} */
   const fences = [];
+
+  /** @type {{ name: string, fence: number, line: number|null }[]} */
+  const nsUsages = [];
 
   for (const seg of segments) {
     if (seg.type !== "ivm") continue;
@@ -390,11 +467,37 @@ export function diagnoseMarkdown(markdown, meta = {}) {
       }
       diagnostics.push(d);
     }
+    if (result.parsed?.namespace) {
+      const bodyLines = String(seg.content).replace(/\r\n/g, "\n").split("\n");
+      let nsLine = null;
+      for (let li = 0; li < bodyLines.length; li++) {
+        const trimmed = bodyLines[li].trim();
+        if (/^@ns\s+/i.test(trimmed) && trimmed.slice(4).trim() === result.parsed.namespace) {
+          nsLine = fenceHeaderLine + li + 1;
+          break;
+        }
+      }
+      nsUsages.push({ name: result.parsed.namespace, fence: fenceIndex, line: nsLine });
+    }
     errorCount += result.errorCount;
     warningCount += result.warningCount;
     fences.push(result);
     fenceIndex++;
     void bodyStartInFence;
+  }
+
+  for (const d of scanNsTypos(nsUsages)) {
+    diagnostics.push({
+      file: meta.file ?? null,
+      fence: d.fence ?? null,
+      line: d.line ?? null,
+      severity: d.severity,
+      code: d.code,
+      message: d.message,
+      hint: d.hint ?? null,
+    });
+    if (d.severity === "warning") warningCount++;
+    else errorCount++;
   }
 
   return { diagnostics, errorCount, warningCount, fenceCount: fenceIndex, fences };

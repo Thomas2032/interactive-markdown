@@ -15,16 +15,24 @@
  *   @phase  name: min..max          (named timeline span for inPhase/phaseT/phaseAt)
  *   @svg [WxH]
  *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
- *   @plot [WxH] [grid|nogrid]
- *   @axis x|y: min..max [step=S] ["Label"]
- *   @series [id] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N] [label="Name"]
+ *   @plot [WxH] [grid|nogrid] [legend|nolegend|legend=pos] [lockAspect] [zoom]
+ *   @axis x|y|y2: min..max [step=S] [scale=linear|log|symlog|categorical] [cats=A,B,C] ["Label"]
+ *   @series [id] [kind=y|bar|scatter|parametric|polar] [axis=y|y2] [marker=circle|square|diamond]
+ *           [size=N] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N] [label="Name"]
  *     y = expression                 (Cartesian; free var `x`)
  *     x = … / y = … / t = min..max   (parametric; free var `t`)
  *     r = … / theta = min..max       (polar; free var `theta`)
+ *     cats = A, B, C                 (bar categories)
+ *     x = [..] / y = [..]           (scatter / bar value arrays)
+ *   @legend pos=top-right|top-left|bottom-right|bottom-left
+ *   @annotate x=N y=N "text" [dx=N] [dy=N] [axis=y|y2] [stroke=#hex]
  *   @grid on|off
+ *   @scrub name duration=N [selector=.im-scrub]
  *   @graph
+ *   @lane id: "Label" y=N [height=H] [fill=#hex]
+ *   @group id: "Label"
  *   @animate [path=ortho|straight|curve] [quantity=N|name] [direction=forward|reverse] [speed=seconds|name]
- *   @node id: "Label" x=N y=N [kind=action|input|output|decision]
+ *   @node id: "Label" x=N y=N [kind=action|input|output|decision] [lane=id] [group=id]
  *   @edge from -> to [from=side] [to=side]
  *     sides: left|right|top|bottom|top-left|top-right|bottom-left|bottom-right
  *            (aliases: tl|tr|bl|br)
@@ -51,36 +59,56 @@
  *   units?: 'deg'|'rad',
  * }} Control
  * @typedef {"left"|"right"|"top"|"bottom"|"top-left"|"top-right"|"bottom-left"|"bottom-right"} GraphSide
- * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
+ * @typedef {{ id: string, label: string, x: number, y: number, kind: string, lane?: string, group?: string }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: string, quantity: number, direction: string, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
- * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog', linthresh?: number }} PlotAxis
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[] }} GraphModel
+ * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog'|'categorical', linthresh?: number, cats?: string[] }} PlotAxis
  * @typedef {{
  *   id?: string,
  *   label?: string,
- *   kind?: 'y'|'parametric'|'polar',
+ *   kind?: 'y'|'parametric'|'polar'|'bar'|'scatter',
  *   expression?: string,
  *   xExpression?: string,
  *   yExpression?: string,
  *   rExpression?: string,
+ *   catsExpression?: string,
  *   tMin?: number,
  *   tMax?: number,
  *   stroke?: string,
  *   fill?: string,
  *   fillOpacity?: number,
  *   width?: number,
+ *   marker?: 'circle'|'square'|'diamond',
+ *   markerSize?: number,
+ *   axis?: 'y'|'y2',
  * }} PlotSeries
+ * @typedef {{
+ *   x?: number,
+ *   y?: number,
+ *   text: string,
+ *   dx?: number,
+ *   dy?: number,
+ *   stroke?: string,
+ *   axis?: 'y'|'y2',
+ * }} PlotAnnotation
  * @typedef {{
  *   width: number|null,
  *   height: number|null,
  *   grid: boolean,
  *   legend?: boolean,
+ *   legendPos?: 'top-right'|'top-left'|'bottom-right'|'bottom-left',
  *   lockAspect?: boolean,
+ *   zoom?: boolean,
  *   x: PlotAxis|null,
  *   y: PlotAxis|null,
+ *   y2: PlotAxis|null,
  *   series: PlotSeries[],
+ *   annotations?: PlotAnnotation[],
  * }} PlotModel
+ * @typedef {{ id: string, label: string, y: number, height: number, fill?: string }} GraphLane
+ * @typedef {{ id: string, label: string }} GraphGroup
+ * @typedef {{ name: string, duration: number, selector: string }} IvmScrub
  * @typedef {{ name: string, params: string[], expression: string }} IvmFn
  * @typedef {{ name: string, min: number, max: number }} IvmPhase
  * @typedef {{
@@ -94,6 +122,7 @@
  *   svgHeight: number|null,
  *   graph: GraphModel|null,
  *   plot: PlotModel|null,
+ *   scrub: IvmScrub|null,
  *   errors: string[],
  *   diagnostics: IvmDiagnostic[],
  * }} IvmBlock
@@ -151,7 +180,8 @@ const KIND_ALIASES = Object.freeze({
 
 const DIRECTIVE_NAMES = [
   "ns", "slider", "timer", "input", "toggle", "let", "calc", "fn", "angle", "phase",
-  "svg", "plot", "axis", "series", "grid", "graph", "node", "edge", "animate",
+  "svg", "plot", "axis", "series", "grid", "legend", "annotate", "scrub",
+  "graph", "lane", "group", "node", "edge", "animate",
   "s", "t", "i", "b", "l", "f", "mode",
 ];
 
@@ -372,6 +402,8 @@ export function parseIvm(body) {
   let graph = null;
   /** @type {PlotModel | null} */
   let plot = null;
+  /** @type {IvmScrub | null} */
+  let scrub = null;
 
   const lines = String(body).replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -409,10 +441,14 @@ export function parseIvm(body) {
         height: null,
         grid: true,
         legend: true,
+        legendPos: "top-right",
         lockAspect: false,
+        zoom: false,
         x: null,
         y: null,
+        y2: null,
         series: [],
+        annotations: [],
       };
       const rest = line.replace(/^@plot\b/i, "").trim();
       if (rest) {
@@ -428,8 +464,15 @@ export function parseIvm(body) {
         if (/\bnolegend\b/i.test(flags)) plot.legend = false;
         else if (/\blegend\b/i.test(flags)) plot.legend = true;
         if (/\b(lockAspect|aspect)\b/i.test(flags)) plot.lockAspect = true;
+        if (/\bzoom\b/i.test(flags)) plot.zoom = true;
+        const legendPosFlag = flags.match(/\blegend\s*=\s*(top-right|top-left|bottom-right|bottom-left)\b/i);
+        if (legendPosFlag) {
+          plot.legend = true;
+          plot.legendPos = legendPosFlag[1].toLowerCase();
+        }
         const leftover = flags
-          .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect)\b/gi, "")
+          .replace(/\blegend\s*=\s*(top-right|top-left|bottom-right|bottom-left)\b/gi, "")
+          .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect|zoom)\b/gi, "")
           .trim();
         if (leftover) report(i + 1, `@plot: unknown ${leftover}`);
       }
@@ -452,9 +495,9 @@ export function parseIvm(body) {
       continue;
     }
 
-    // @axis x|y: min..max [step=S] [scale=linear|log|symlog] [linthresh=N] ["Label"]
+    // @axis x|y|y2: min..max [step=S] [scale=…] [cats=…] ["Label"]
     {
-      const m = line.match(/^@axis\s+([xy])\s*:\s*(.+)$/i);
+      const m = line.match(/^@axis\s+(x|y2|y)\s*:\s*(.+)$/i);
       if (m) {
         if (!plot) {
           report(i + 1, `@axis ${m[1]}: only valid after @plot`);
@@ -466,14 +509,19 @@ export function parseIvm(body) {
         const rm = rest.match(
           /^(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\.\.(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\s*(.*)$/
         );
-        if (!rm) {
+        let min = 0;
+        let max = 1;
+        let flagSrc = rest;
+        if (rm) {
+          min = Number(rm[1]);
+          max = Number(rm[2]);
+          flagSrc = rm[3] || "";
+        } else if (!/\bcats\s*=/i.test(rest) && !/\bscale\s*=\s*categorical\b/i.test(rest)) {
           report(i + 1, `@axis ${which}: expected min..max [step=S] [scale=…]`);
           i++;
           continue;
         }
-        const min = Number(rm[1]);
-        const max = Number(rm[2]);
-        const flags = parseFlags(rm[3] || "");
+        const flags = parseFlags(flagSrc);
         const step = flags.step !== undefined ? Number(flags.step) : undefined;
         /** @type {PlotAxis} */
         const axis = {
@@ -483,12 +531,12 @@ export function parseIvm(body) {
         if (step !== undefined && Number.isFinite(step) && step > 0) axis.step = step;
         if (label || flags.label) axis.label = label || flags.label;
         const scaleRaw = flags.scale !== undefined ? String(flags.scale).toLowerCase() : "linear";
-        if (scaleRaw === "linear" || scaleRaw === "log" || scaleRaw === "symlog") {
+        if (scaleRaw === "linear" || scaleRaw === "log" || scaleRaw === "symlog" || scaleRaw === "categorical") {
           axis.scale = scaleRaw;
         } else {
           report(i + 1, `@axis ${which}: unknown scale ${flags.scale}`, {
             code: "axis-scale",
-            hint: "scale=linear|log|symlog",
+            hint: "scale=linear|log|symlog|categorical",
           });
           axis.scale = "linear";
         }
@@ -497,9 +545,24 @@ export function parseIvm(body) {
           if (Number.isFinite(lt) && lt > 0) axis.linthresh = lt;
           else report(i + 1, `@axis ${which}: linthresh must be > 0`);
         }
+        if (flags.cats !== undefined) {
+          axis.cats = String(flags.cats)
+            .split(/\s*,\s*/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+          if (!axis.scale || axis.scale === "linear") axis.scale = "categorical";
+          if (axis.cats.length) {
+            axis.min = -0.5;
+            axis.max = axis.cats.length - 0.5;
+            if (axis.step == null) axis.step = 1;
+          }
+        }
         if (which === "x") {
           if (plot.x) report(i + 1, "Duplicate @axis x");
           plot.x = axis;
+        } else if (which === "y2") {
+          if (plot.y2) report(i + 1, "Duplicate @axis y2");
+          plot.y2 = axis;
         } else {
           if (plot.y) report(i + 1, "Duplicate @axis y");
           plot.y = axis;
@@ -521,7 +584,7 @@ export function parseIvm(body) {
       const series = {};
       let tail = rest;
       const idMatch = tail.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
-      const reservedIds = /^(stroke|fill|fillOpacity|width|label|y|x|r|t|theta)$/i;
+      const reservedIds = /^(stroke|fill|fillOpacity|width|label|kind|axis|marker|size|y|x|r|t|theta|cats)$/i;
       if (idMatch && !reservedIds.test(idMatch[1])) {
         series.id = idMatch[1];
         tail = tail.slice(idMatch[0].length).trim();
@@ -549,6 +612,32 @@ export function parseIvm(body) {
         const n = Number(flags.width);
         if (Number.isFinite(n)) series.width = n;
       }
+      if (flags.kind !== undefined) {
+        const k = String(flags.kind).toLowerCase();
+        if (k === "y" || k === "bar" || k === "scatter" || k === "parametric" || k === "polar") {
+          series.kind = k === "y" ? "y" : k;
+        } else {
+          report(i + 1, `@series: unknown kind ${flags.kind}`, {
+            code: "series-kind",
+            hint: "kind=y|bar|scatter|parametric|polar",
+          });
+        }
+      }
+      if (flags.axis !== undefined) {
+        const a = String(flags.axis).toLowerCase();
+        if (a === "y" || a === "y2") series.axis = a;
+        else report(i + 1, `@series: axis must be y|y2`, { code: "series-axis" });
+      }
+      if (flags.marker !== undefined) {
+        const mk = String(flags.marker).toLowerCase();
+        if (mk === "circle" || mk === "square" || mk === "diamond") series.marker = mk;
+        else report(i + 1, `@series: marker must be circle|square|diamond`);
+      }
+      if (flags.size !== undefined) {
+        const n = Number(flags.size);
+        if (Number.isFinite(n) && n > 0) series.markerSize = n;
+        else report(i + 1, `@series: size must be > 0`);
+      }
       if (flags.t !== undefined) {
         const tr = parseRange(flags.t);
         if (tr) {
@@ -571,13 +660,14 @@ export function parseIvm(body) {
           j++;
           continue;
         }
-        const cont = next.match(/^\s*(y|x|r|t|theta)\s*=\s*(.+)$/i);
+        const cont = next.match(/^\s*(y|x|r|t|theta|cats)\s*=\s*(.+)$/i);
         if (!cont) break;
         const key = cont[1].toLowerCase();
         const value = cont[2].trim();
         if (key === "y") series.expression = value;
         else if (key === "x") series.xExpression = value;
         else if (key === "r") series.rExpression = value;
+        else if (key === "cats") series.catsExpression = value;
         else if (key === "t" || key === "theta") {
           const tr = parseRange(value);
           if (tr) {
@@ -588,13 +678,44 @@ export function parseIvm(body) {
         i = j;
         j++;
       }
-      // Infer kind
-      if (series.rExpression) {
+      // Infer / validate kind
+      const explicitKind = series.kind;
+      if (explicitKind === "bar") {
+        if (!series.expression && !series.yExpression) {
+          report(i + 1, "@series kind=bar needs y = values (array or expression)", {
+            code: "series-kind",
+            hint: "y = [10, 20, 15] with cats = A, B, C",
+          });
+        } else {
+          if (series.expression && !series.yExpression) series.yExpression = series.expression;
+          plot.series.push(series);
+        }
+      } else if (explicitKind === "scatter") {
+        if (series.xExpression && (series.expression || series.yExpression)) {
+          if (series.expression && !series.yExpression) {
+            series.yExpression = series.expression;
+            delete series.expression;
+          }
+          if (!series.marker) series.marker = "circle";
+          plot.series.push(series);
+        } else if (series.expression) {
+          if (!series.marker) series.marker = "circle";
+          plot.series.push(series);
+        } else {
+          report(i + 1, "@series kind=scatter needs y = … or x=/y= arrays", {
+            code: "series-kind",
+          });
+        }
+      } else if (series.rExpression || explicitKind === "polar") {
         series.kind = "polar";
         if (series.tMin === undefined) series.tMin = 0;
         if (series.tMax === undefined) series.tMax = Math.PI * 2;
         if (!series.rExpression) report(i + 1, "@series: polar needs r = expression");
-      } else if (series.xExpression && (series.expression || series.yExpression)) {
+        else plot.series.push(series);
+      } else if (
+        (series.xExpression && (series.expression || series.yExpression) && !explicitKind) ||
+        explicitKind === "parametric"
+      ) {
         series.kind = "parametric";
         if (series.expression && !series.yExpression) {
           series.yExpression = series.expression;
@@ -602,19 +723,187 @@ export function parseIvm(body) {
         }
         if (series.tMin === undefined) series.tMin = 0;
         if (series.tMax === undefined) series.tMax = Math.PI * 2;
-      } else if (series.expression) {
+        if (!(series.xExpression && series.yExpression)) {
+          report(i + 1, "@series: parametric needs both x = and y =");
+        } else plot.series.push(series);
+      } else if (series.expression || explicitKind === "y") {
         series.kind = "y";
+        if (!series.expression) {
+          report(i + 1, "@series: expected y = expression");
+        } else plot.series.push(series);
       } else if (series.xExpression && !series.expression) {
         report(i + 1, "@series: parametric needs both x = and y =");
       } else {
-        report(i + 1, "@series: expected y = expression (or x=/y= parametric, or r= polar)", {
+        report(i + 1, "@series: expected y = expression (or x=/y= parametric, r= polar, kind=bar|scatter)", {
           code: "series-kind",
-          hint: "Cartesian: y = …; parametric: x = … and y = … with t=min..max; polar: r = … with theta=min..max",
+          hint: "Cartesian: y = …; bar: kind=bar + cats= + y=; scatter: kind=scatter + x=/y=",
         });
       }
-      if (series.kind) plot.series.push(series);
       i++;
       continue;
+    }
+
+
+    // @legend pos=…
+    if (/^@legend\b/i.test(line)) {
+      if (!plot) {
+        report(i + 1, "@legend is only valid after @plot");
+        i++;
+        continue;
+      }
+      const rest = line.replace(/^@legend\b/i, "").trim();
+      const flags = parseFlags(rest);
+      const posRaw = (flags.pos || rest.replace(/^pos=/i, "").trim() || "").toLowerCase();
+      const allowed = new Set(["top-right", "top-left", "bottom-right", "bottom-left"]);
+      if (allowed.has(posRaw)) {
+        plot.legend = true;
+        plot.legendPos = /** @type {any} */ (posRaw);
+      } else if (/\bnolegend\b/i.test(rest) || posRaw === "off" || posRaw === "none") {
+        plot.legend = false;
+      } else if (!rest) {
+        plot.legend = true;
+      } else {
+        report(i + 1, `@legend: expected pos=top-right|top-left|bottom-right|bottom-left`, {
+          code: "legend-pos",
+        });
+      }
+      i++;
+      continue;
+    }
+
+    // @annotate x=N y=N "text" …
+    if (/^@annotate\b/i.test(line)) {
+      if (!plot) {
+        report(i + 1, "@annotate is only valid after @plot");
+        i++;
+        continue;
+      }
+      const rest = line.replace(/^@annotate\b/i, "").trim();
+      const [restNoLabel, textLabel] = takeLabel(rest);
+      const flags = parseFlags(restNoLabel);
+      const label = textLabel || flags.text || flags.label;
+      if (!label) {
+        report(i + 1, '@annotate: expected "text"', { code: "annotate" });
+        i++;
+        continue;
+      }
+      const x = flags.x !== undefined ? Number(flags.x) : NaN;
+      const y = flags.y !== undefined ? Number(flags.y) : NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        report(i + 1, "@annotate: requires x= and y=", { code: "annotate" });
+        i++;
+        continue;
+      }
+      /** @type {PlotAnnotation} */
+      const ann = { x, y, text: String(label) };
+      if (flags.dx !== undefined && Number.isFinite(Number(flags.dx))) ann.dx = Number(flags.dx);
+      if (flags.dy !== undefined && Number.isFinite(Number(flags.dy))) ann.dy = Number(flags.dy);
+      if (flags.stroke) ann.stroke = String(flags.stroke);
+      if (flags.axis === "y2" || flags.axis === "y") ann.axis = flags.axis;
+      if (!plot.annotations) plot.annotations = [];
+      plot.annotations.push(ann);
+      i++;
+      continue;
+    }
+
+    // @scrub name duration=N [selector=.im-scrub]
+    if (/^@scrub\b/i.test(line)) {
+      if (scrub) {
+        report(i + 1, "Duplicate @scrub");
+        i++;
+        continue;
+      }
+      const rest = line.replace(/^@scrub\b/i, "").trim();
+      const m = rest.match(/^([A-Za-z_][A-Za-z0-9_]*)\b(.*)$/);
+      if (!m) {
+        report(i + 1, "@scrub: expected @scrub name duration=N", {
+          code: "scrub",
+          hint: "binds a timer/slider to CSS animation-delay on .im-scrub elements",
+        });
+        i++;
+        continue;
+      }
+      const flags = parseFlags(m[2] || "");
+      const duration = flags.duration !== undefined ? Number(flags.duration) : NaN;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        report(i + 1, "@scrub: duration must be > 0 seconds", { code: "scrub" });
+        i++;
+        continue;
+      }
+      scrub = {
+        name: m[1],
+        duration,
+        selector: flags.selector ? String(flags.selector) : ".im-scrub",
+      };
+      i++;
+      continue;
+    }
+
+    // @lane id: "Label" y=N [height=H] [fill=#hex]
+    {
+      const m = line.match(/^@lane\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]+)$/i);
+      if (m) {
+        const id = m[1];
+        if (!graph) {
+          report(i + 1, `@lane ${id}: only valid after @graph`);
+          i++;
+          continue;
+        }
+        const quoted = parseQuotedPrefix(m[2]);
+        if (!quoted) {
+          report(i + 1, `@lane ${id}: expected "Label" y=N`);
+          i++;
+          continue;
+        }
+        if ((graph.lanes || []).some((l) => l.id === id)) {
+          report(i + 1, `@lane ${id}: duplicate id`);
+          i++;
+          continue;
+        }
+        const flags = parseFlags(quoted.rest);
+        const y = flags.y !== undefined ? Number(flags.y) : 0;
+        const height = flags.height !== undefined ? Number(flags.height) : 120;
+        if (!graph.lanes) graph.lanes = [];
+        /** @type {GraphLane} */
+        const lane = {
+          id,
+          label: quoted.value,
+          y: Number.isFinite(y) ? y : 0,
+          height: Number.isFinite(height) && height > 0 ? height : 120,
+        };
+        if (flags.fill) lane.fill = String(flags.fill);
+        graph.lanes.push(lane);
+        i++;
+        continue;
+      }
+    }
+
+    // @group id: "Label"
+    {
+      const m = line.match(/^@group\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]+)$/i);
+      if (m) {
+        const id = m[1];
+        if (!graph) {
+          report(i + 1, `@group ${id}: only valid after @graph`);
+          i++;
+          continue;
+        }
+        const quoted = parseQuotedPrefix(m[2]);
+        if (!quoted) {
+          report(i + 1, `@group ${id}: expected "Label"`);
+          i++;
+          continue;
+        }
+        if ((graph.groups || []).some((g) => g.id === id)) {
+          report(i + 1, `@group ${id}: duplicate id`);
+          i++;
+          continue;
+        }
+        if (!graph.groups) graph.groups = [];
+        graph.groups.push({ id, label: quoted.value });
+        i++;
+        continue;
+      }
     }
 
     // @graph — following @node / @edge lines are an editable graph
@@ -624,7 +913,7 @@ export function parseIvm(body) {
         hint: "use separate fences, or drop @plot",
       });
       else if (graph) report(i + 1, "Duplicate @graph");
-      else graph = { nodes: [], edges: [] };
+      else graph = { nodes: [], edges: [], lanes: [], groups: [] };
       i++;
       continue;
     }
@@ -665,13 +954,17 @@ export function parseIvm(body) {
             hint: "kind=action|input|output|decision",
           });
         }
-        graph.nodes.push({
+        /** @type {GraphNode} */
+        const node = {
           id,
           label: quoted.value,
           x: Number.isFinite(x) ? x : 48,
           y: Number.isFinite(y) ? y : 48,
           kind: NODE_KINDS.has(rawKind) ? rawKind : "action",
-        });
+        };
+        if (flags.lane) node.lane = String(flags.lane);
+        if (flags.group) node.group = String(flags.group);
+        graph.nodes.push(node);
         i++;
         continue;
       }
@@ -962,7 +1255,7 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, errors, diagnostics };
+  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, scrub, errors, diagnostics };
 }
 
 /**
