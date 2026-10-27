@@ -1,6 +1,7 @@
 /**
- * Basic directed-graph editor.
+ * Directed-graph preview (read-only by default).
  * The model is plain data ({ nodes, edges }) so it can be stored in an ```ivm @graph fence.
+ * Pass `{ editable: true }` to enable the legacy interactive editor chrome (tests only).
  * Gestures: drag a node, drag a side port onto another node, double-click to add or rename.
  */
 
@@ -537,14 +538,15 @@ function sideRoute(from, to, fromSide, toSide, style) {
 let mountSeq = 0;
 
 /**
- * Mount an interactive graph.
+ * Mount a graph preview (read-only unless `editable: true`).
  * @param {HTMLElement} container
  * @param {GraphModel} initial
- * @param {{ onChange?: (model: GraphModel) => void }} [options]
- * @returns {{ destroy: () => void, getModel: () => GraphModel }}
+ * @param {{ onChange?: (model: GraphModel) => void, editable?: boolean }} [options]
+ * @returns {{ destroy: () => void, getModel: () => GraphModel, setLiveMotion: (patch: Partial<GraphMotion>|null) => void }}
  */
 export function mountGraphEditor(container, initial, options = {}) {
   const doc = container.ownerDocument || globalThis.document;
+  const editable = options.editable === true;
   const markerId = "im-graph-arrow-" + ++mountSeq;
   /** @type {GraphModel} */
   let model = cloneModel(initial);
@@ -658,11 +660,18 @@ export function mountGraphEditor(container, initial, options = {}) {
 
   const empty = doc.createElement("div");
   empty.className = "im-graph-empty";
-  empty.textContent = "This graph is empty. Add a node, or double-click the canvas.";
+  empty.textContent = editable
+    ? "This graph is empty. Add a node, or double-click the canvas."
+    : "This graph is empty.";
 
   stage.append(svg, empty);
   canvas.appendChild(stage);
-  root.append(bar, motionBar, help, canvas);
+  if (editable) root.append(bar, motionBar, help, canvas);
+  else root.append(canvas);
+  if (!editable) {
+    root.classList.add("im-graph-readonly");
+    canvas.removeAttribute("tabIndex");
+  }
   container.appendChild(root);
 
   function commit() {
@@ -894,16 +903,18 @@ export function mountGraphEditor(container, initial, options = {}) {
     const label = doc.createElement("div");
     label.className = "im-graph-label";
     label.textContent = node.label;
-    label.title = "Double-click to rename";
+    if (editable) label.title = "Double-click to rename";
     el.appendChild(label);
 
-    for (const side of GRAPH_SIDES) {
-      const port = doc.createElement("button");
-      port.type = "button";
-      port.className = "im-graph-port im-graph-port-" + side;
-      port.dataset.side = side;
-      port.setAttribute("aria-label", `Connect from the ${side} of ${node.label}`);
-      el.appendChild(port);
+    if (editable) {
+      for (const side of GRAPH_SIDES) {
+        const port = doc.createElement("button");
+        port.type = "button";
+        port.className = "im-graph-port im-graph-port-" + side;
+        port.dataset.side = side;
+        port.setAttribute("aria-label", `Connect from the ${side} of ${node.label}`);
+        el.appendChild(port);
+      }
     }
     return el;
   }
@@ -1001,6 +1012,25 @@ export function mountGraphEditor(container, initial, options = {}) {
     }
     paint();
     if (opts.commit !== false) commit();
+  }
+
+  // Read-only preview: paint + live motion only (no drag / ports / write-back).
+  if (!editable) {
+    paint();
+    return {
+      destroy() {
+        dead = true;
+        clearTimeout(flashTimer);
+        container.innerHTML = "";
+      },
+      getModel() {
+        return cloneModel(model);
+      },
+      setLiveMotion(patch) {
+        liveMotion = patch ? { ...patch } : null;
+        if (!dead) paint();
+      },
+    };
   }
 
   addBtn.addEventListener("click", () => {

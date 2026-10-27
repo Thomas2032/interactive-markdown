@@ -1,6 +1,6 @@
 # IVM P1 demo
 
-Graph controls (with env-bound animation), self-edges, corner ports, shared preview/editor env, and plot hover tooltips.
+Graph controls (with env-bound animation), self-edges, corner ports, shared `@ns` env, and plot hover tooltips.
 
 ## Graph + controls + self-edge + corner ports
 
@@ -22,7 +22,7 @@ Sliders drive `@animate` **quantity** and **speed**. The agent node has a self-e
 @edge agent -> agent from=bottom-left to=top-left
 ```
 
-Drag the **Dots** or **Seconds / lap** sliders — traveling dots update without rewriting the fence. Open the Graph editor tab: the same slider values are shared with Preview.
+Drag the **Dots** or **Seconds / lap** sliders — traveling dots update live in the read-only graph preview.
 
 ## Plot hover tooltip
 

@@ -293,7 +293,7 @@ Mixing reminder: `@plot` may end with trailing `@svg`; `@graph` stays alone (sha
 
 ## 15. Directed graph (no animation)
 
-**Ask:** Simple Think / Act / Done flowchart you can edit in the Graph editor.
+**Ask:** Simple Think / Act / Done flowchart rendered from `@graph`.
 
 ```ivm
 @graph

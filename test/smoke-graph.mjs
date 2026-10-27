@@ -160,29 +160,18 @@ const mounted = mountGraphEditor(host, {
 assert("dom nodes", host.querySelectorAll(".im-graph-node").length === 2);
 assert("decision diamond", !!host.querySelector(".im-graph-diamond"));
 assert("visible edge", !!host.querySelector(".im-graph-edge[marker-end]"));
-assert("delete starts disabled", host.querySelector("[data-action=delete]").disabled === true);
-
-host.querySelector(".im-graph-node").dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
-assert("delete enables", host.querySelector("[data-action=delete]").disabled === false);
-const label = host.querySelector(".im-graph-label");
-label.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
-label.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
-assert("double press opens rename", !!host.querySelector(".im-graph-rename"));
+assert("read-only has no edit bar", !host.querySelector(".im-graph-bar"));
+assert("read-only has no ports", host.querySelectorAll(".im-graph-port").length === 0);
+assert("read-only class", !!host.querySelector(".im-graph-readonly"));
+mounted.destroy();
+assert("destroy clears", host.innerHTML === "");
 
 const emptyHost = document.createElement("div");
 document.body.appendChild(emptyHost);
-let added = "";
-const emptyMount = mountGraphEditor(emptyHost, { nodes: [], edges: [] }, {
-  onChange(model) {
-    added = serializeGraph(model);
-  },
-});
+const emptyMount = mountGraphEditor(emptyHost, { nodes: [], edges: [] });
 assert("empty copy", emptyHost.querySelector(".im-graph-empty")?.textContent.includes("empty"));
-emptyHost.querySelector("[data-action=add]").dispatchEvent(new window.Event("click", { bubbles: true }));
-assert("add writes n1", added.includes('@node n1: "Node" x=32 y=32'), added);
-assert("add paints node", emptyHost.querySelectorAll(".im-graph-node").length === 1);
+assert("empty has no add button", !emptyHost.querySelector("[data-action=add]"));
 emptyMount.destroy();
-assert("destroy clears", emptyHost.innerHTML === "");
 
 const motionHost = document.createElement("div");
 document.body.appendChild(motionHost);
@@ -202,30 +191,13 @@ assert("traveling dot", !!motionHost.querySelector("animateMotion"));
 assert("node pulse stage", motionHost.querySelector(".im-graph-stage")?.classList.contains("is-animated"));
 assert("edge svg has no scene viewBox", !motionHost.querySelector(".im-graph-edges")?.getAttribute("viewBox"));
 assert("arrow glyph viewBox stays", motionHost.querySelector("marker")?.getAttribute("viewBox") === "0 0 10 10");
-assert("eight ports", motionHost.querySelector(".im-graph-node")?.querySelectorAll(".im-graph-port").length === 8);
-assert("top port", !!motionHost.querySelector(".im-graph-port-top"));
-assert("bottom port", !!motionHost.querySelector(".im-graph-port-bottom"));
-const qty = motionHost.querySelector('[data-motion="quantity"]');
-qty.value = "3";
-qty.dispatchEvent(new window.Event("change", { bubbles: true }));
-assert("quantity paints three dots", motionHost.querySelectorAll("animateMotion").length === 3);
-const pathSel = motionHost.querySelector('[data-motion="path"]');
-for (const opt of pathSel.querySelectorAll("option")) {
-  if (opt.getAttribute("value") === "curve") opt.setAttribute("selected", "");
-  else opt.removeAttribute("selected");
-}
-pathSel.dispatchEvent(new window.Event("change", { bubbles: true }));
-assert("curve path", /C /.test(motionHost.querySelector(".im-graph-edge.is-animated")?.getAttribute("d") || ""));
-const dirSel = motionHost.querySelector('[data-motion="direction"]');
-for (const opt of dirSel.querySelectorAll("option")) {
-  if (opt.getAttribute("value") === "reverse") opt.setAttribute("selected", "");
-  else opt.removeAttribute("selected");
-}
-dirSel.dispatchEvent(new window.Event("change", { bubbles: true }));
-assert("reverse direction", motionHost.querySelector("animateMotion")?.getAttribute("keyPoints") === "1;0");
-assert("motion writes back", motion.getModel().motion.quantity === 3 && motion.getModel().motion.path === "curve");
+assert("read-only animated has no ports", motionHost.querySelectorAll(".im-graph-port").length === 0);
+assert("read-only animated has no motion toolbar", !motionHost.querySelector(".im-graph-motion-bar"));
+motion.setLiveMotion({ quantity: 3, speed: 1.5, path: "curve", direction: "reverse" });
+assert("live motion dots", motionHost.querySelectorAll("animateMotion").length === 3);
+assert("live reverse", motionHost.querySelector("animateMotion")?.getAttribute("keyPoints") === "1;0");
+assert("live curve path", /C /.test(motionHost.querySelector(".im-graph-edge.is-animated")?.getAttribute("d") || ""));
 motion.destroy();
-mounted.destroy();
 
 const preview = document.getElementById("preview");
 const src = `# Flow
@@ -241,18 +213,11 @@ const src = `# Flow
 <svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><circle r="{{r}}"/></svg>
 \`\`\`
 `;
-let change = null;
-const docMount = renderDocument(preview, src, {
-  marked,
-  onGraphChange(index, body) {
-    change = { index, body };
-  },
-});
+const docMount = renderDocument(preview, src, { marked });
 assert("preview graph", preview.querySelectorAll(".im-graph-node").length === 1);
 assert("slider still mounts", !!preview.querySelector("input[type=range]"));
-preview.querySelector("[data-action=add]").dispatchEvent(new window.Event("click", { bubbles: true }));
-assert("callback index 0", change && change.index === 0, JSON.stringify(change));
-assert("callback body", change && change.body.includes("@node n1:"), change && change.body);
+assert("preview graph is read-only", !!preview.querySelector(".im-graph-readonly"));
+assert("preview has no add node", !preview.querySelector("[data-action=add]"));
 docMount.destroy();
 
 const replaced = replaceIvmFence(src, 0, '@graph\n@node z: "Z" x=8 y=8 kind=input\n');
@@ -262,7 +227,6 @@ const replacedSecond = replaceIvmFence(src, 1, "@slider r: 1..9 = 3\n@svg\n<svg/
 assert("second fence replaced", replacedSecond.includes("1..9"));
 assert("first fence kept", replacedSecond.includes('@node a: "A"'));
 
-
 const portsHost = document.createElement("div");
 document.body.appendChild(portsHost);
 const portsMounted = mountGraphEditor(portsHost, {
@@ -271,11 +235,26 @@ const portsMounted = mountGraphEditor(portsHost, {
   animated: true,
   motion: { path: "curve", quantity: 2, direction: "forward", speed: 2, quantityFrom: "dots", speedFrom: "pace" },
 });
-assert("corner ports in DOM", portsHost.querySelectorAll(".im-graph-port").length === 8);
 assert("self edge drawn", !!portsHost.querySelector(".im-graph-edge"));
+assert("read-only self-edge has no ports", portsHost.querySelectorAll(".im-graph-port").length === 0);
 portsMounted.setLiveMotion({ quantity: 5, speed: 1.2 });
 assert("live motion dots", portsHost.querySelectorAll("animateMotion").length === 5);
 portsMounted.destroy();
+
+// editable:true still exposes editor chrome (legacy / unit coverage)
+const editHost = document.createElement("div");
+document.body.appendChild(editHost);
+let added = "";
+const editMount = mountGraphEditor(editHost, { nodes: [], edges: [] }, {
+  editable: true,
+  onChange(model) {
+    added = serializeGraph(model);
+  },
+});
+assert("editable shows bar", !!editHost.querySelector(".im-graph-bar"));
+editHost.querySelector("[data-action=add]").dispatchEvent(new window.Event("click", { bubbles: true }));
+assert("editable add writes n1", added.includes('@node n1: "Node" x=32 y=32'), added);
+editMount.destroy();
 
 // P4: toolbar literal edits clear quantityFrom/speedFrom bindings
 const boundModel = {

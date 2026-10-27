@@ -1031,7 +1031,7 @@ export function parseIvm(body) {
       }
     }
 
-    // @graph [layout=dagre|flow|layered] — following @node / @edge lines are an editable graph
+    // @graph [layout=dagre|flow|layered] — following @node / @edge lines are a directed graph
     if (/^@graph\b/i.test(line)) {
       if (plot) {
         report(i + 1, "@graph cannot mix with @plot", {

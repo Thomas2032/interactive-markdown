@@ -23,7 +23,7 @@ function resolveMarked(override) {
  * Render full Interactive Markdown into a preview element.
  * @param {HTMLElement} previewEl
  * @param {string} source
- * @param {{ marked?: { parse: (md: string) => string }, onGraphChange?: (fenceIndex: number, body: string) => void }} [options]
+ * @param {{ marked?: { parse: (md: string) => string }, envStore?: Map<string, Record<string, unknown>>, namespaces?: Map<string, Record<string, unknown>> }} [options]
  * @returns {{ destroy: () => void }}
  */
 export function renderDocument(previewEl, source, options = {}) {
@@ -55,9 +55,6 @@ export function renderDocument(previewEl, source, options = {}) {
       previewEl.appendChild(host);
       mounts.push(
         mountIvm(host, seg.content, {
-          onGraphChange(body) {
-            options.onGraphChange?.(fenceIndex, body);
-          },
           envStore: options.envStore,
           envKey: options.envStore ? `ivm:${fenceIndex}` : undefined,
           namespaces: options.namespaces,

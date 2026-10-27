@@ -88,10 +88,10 @@ const agent = readFileSync(new URL("../examples/agent-loop.md", import.meta.url)
 const agentMount = renderDocument(preview, agent, { marked });
 assert("agent loop canvas", !!preview.querySelector(".im-graph-canvas"));
 assert("agent loop nodes", preview.querySelectorAll(".im-graph-node").length === 8);
-assert("agent loop top port", preview.querySelectorAll(".im-graph-port-top").length === 8);
-assert("agent loop bottom port", preview.querySelectorAll(".im-graph-port-bottom").length === 8);
+assert("agent loop read-only", !!preview.querySelector(".im-graph-readonly"));
+assert("agent loop no ports", preview.querySelectorAll(".im-graph-port").length === 0);
 assert("agent loop dots", preview.querySelectorAll("animateMotion").length === 3 * 8);
-assert("agent loop motion bar", !!preview.querySelector('.im-graph-motion-bar [data-motion="quantity"]'));
+assert("agent loop no motion bar", !preview.querySelector(".im-graph-motion-bar"));
 const agentSvg = preview.querySelector(".im-graph-edges")?.outerHTML || "";
 assert("agent loop has no remote url", !/https?:\/\//i.test(agentSvg), agentSvg.slice(0, 200));
 agentMount.destroy();

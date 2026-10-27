@@ -5,7 +5,7 @@
 import { evaluate, substitute } from "./expr.js";
 import { parseIvm } from "./parse-ivm.js";
 import { sanitizeSvg } from "./sanitize-svg.js";
-import { mountGraphEditor, serializeGraph, normalizeMotion } from "./graph-editor.js";
+import { mountGraphEditor, normalizeMotion } from "./graph-editor.js";
 import { buildPlotSvg, normalizePlot, hitTestPlot } from "./plot.js";
 
 /** @type {Map<string, Record<string, unknown>>} */
@@ -46,36 +46,6 @@ function exprOptionsFrom(parsed) {
   };
 }
 
-/**
- * Emit @angle / @fn / @phase lines for fence rewrite.
- * @param {import('./parse-ivm.js').IvmBlock | object} parsed
- * @returns {string[]}
- */
-function serializeMetaLines(parsed) {
-  /** @type {string[]} */
-  const lines = [];
-  if (parsed?.angleMode === "deg" || parsed?.angleMode === "rad") {
-    lines.push(`@angle ${parsed.angleMode}`);
-  }
-  for (const fn of parsed?.fns || []) {
-    if (!fn?.name) continue;
-    const params = (fn.params || []).join(", ");
-    lines.push(`@fn ${fn.name}(${params}) = ${fn.expression ?? "0"}`);
-  }
-  for (const phase of parsed?.phases || []) {
-    if (!phase?.name) continue;
-    lines.push(`@phase ${phase.name}: ${phase.min}..${phase.max}`);
-  }
-  if (parsed?.scrub?.name && Number(parsed.scrub.duration) > 0) {
-    let line = `@scrub ${parsed.scrub.name} duration=${parsed.scrub.duration}`;
-    if (parsed.scrub.selector && parsed.scrub.selector !== ".im-scrub") {
-      line += ` selector=${parsed.scrub.selector}`;
-    }
-    lines.push(line);
-  }
-  return lines;
-}
-
 /** Clear shared `@ns` state (call before re-rendering a whole document). */
 export function resetNamespaces() {
   namespaces.clear();
@@ -86,7 +56,6 @@ export function resetNamespaces() {
  * @param {HTMLElement} container
  * @param {string} fenceBody
  * @param {{
- *   onGraphChange?: (body: string) => void,
  *   envStore?: Map<string, Record<string, unknown>>,
  *   envKey?: string,
  *   namespaces?: Map<string, Record<string, unknown>>,
@@ -610,13 +579,7 @@ export function mountIvm(container, fenceBody, options = {}) {
   if (parsed.graph) {
     const graphHost = doc.createElement("div");
     container.appendChild(graphHost);
-    graphMount = mountGraphEditor(graphHost, parsed.graph, {
-      onChange(model) {
-        // Preserve control lines + animate bindings when rewriting the fence
-        const body = serializeGraphWithControls(parsed, model);
-        options.onGraphChange?.(body);
-      },
-    });
+    graphMount = mountGraphEditor(graphHost, parsed.graph);
     rebind();
     return {
       destroy() {
@@ -777,80 +740,4 @@ export function mountIvm(container, fenceBody, options = {}) {
       return { ...buildEnv() };
     },
   };
-}
-
-/**
- * Rewrite a graph fence while keeping controls / @ns / animate bindings.
- * @param {import('./parse-ivm.js').IvmBlock | object} parsed
- * @param {object} model
- */
-function serializeGraphWithControls(parsed, model) {
-  const lines = [];
-  if (parsed.namespace) lines.push(`@ns ${parsed.namespace}`);
-  lines.push(...serializeMetaLines(parsed));
-  for (const c of parsed.controls || []) {
-    const line = serializeControlLine(c);
-    if (line) lines.push(line);
-  }
-  // serializeGraph emits @graph / @animate / nodes / edges
-  const graphBody = serializeGraph(mergeMotionBindings(model, parsed.graph?.motion));
-  lines.push(graphBody.replace(/\s*$/, ""));
-  return lines.join("\n").replace(/\s*$/, "\n");
-}
-
-/**
- * Keep speedFrom/quantityFrom when the editor rewrites motion literals.
- * @param {object} model
- * @param {object | null | undefined} originalMotion
- */
-function mergeMotionBindings(model, originalMotion) {
-  if (!model?.animated) return model;
-  const next = {
-    ...model,
-    motion: normalizeMotion({
-      ...normalizeMotion(originalMotion),
-      ...normalizeMotion(model.motion),
-      quantityFrom: originalMotion?.quantityFrom || model.motion?.quantityFrom,
-      speedFrom: originalMotion?.speedFrom || model.motion?.speedFrom,
-    }),
-  };
-  // If editor wrote literal quantity/speed, keep From names from original when present
-  if (originalMotion?.quantityFrom) next.motion.quantityFrom = originalMotion.quantityFrom;
-  if (originalMotion?.speedFrom) next.motion.speedFrom = originalMotion.speedFrom;
-  return next;
-}
-
-/**
- * @param {object} c
- * @returns {string|null}
- */
-function serializeControlLine(c) {
-  if (!c || !c.kind) return null;
-  if (c.kind === "let") {
-    if (!c.name || c.expression == null) return null;
-    return `@let ${c.name} = ${c.expression}`;
-  }
-  if (c.kind === "slider" || c.kind === "timer") {
-    const [lo, hi] = c.range || [0, 1];
-    let line = `@${c.kind} ${c.name}: ${lo}..${hi} = ${c.default ?? lo}`;
-    if (c.step != null && c.step !== 1) line += ` step=${c.step}`;
-    if (c.kind === "timer") {
-      if (c.speed != null && c.speed !== 30) line += ` speed=${c.speed}`;
-      if (c.loop === false) line += " noloop";
-    }
-    if (c.units) line += ` ${c.units}`;
-    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
-    return line;
-  }
-  if (c.kind === "input") {
-    let line = `@input ${c.name}: ${JSON.stringify(String(c.default ?? ""))}`;
-    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
-    return line;
-  }
-  if (c.kind === "toggle") {
-    let line = `@toggle ${c.name}: ${c.default ? "true" : "false"}`;
-    if (c.label) line += ` ${JSON.stringify(String(c.label))}`;
-    return line;
-  }
-  return null;
 }

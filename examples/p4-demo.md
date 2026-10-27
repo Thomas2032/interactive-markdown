@@ -1,10 +1,10 @@
 # IVM P4 demo
 
-Editor polish: example picker stays on the loaded file, clearer **Namespace (@ns)** inspector fields, and **Copy fence** / **Reset env** on Graph editor blocks.
+Editor polish: example picker stays on the loaded file, and fences can share control values with **`@ns`**.
 
 ## Shared namespace + graph
 
-Two fences share `@ns demo`. Move **Scale** in either place — the other follows. In the **Graph editor** tab, select the Graph block to see **Namespace (@ns)** help, then use **Copy fence** or **Reset env**.
+Two fences share `@ns demo`. Move **Scale** (or the graph sliders) — values stay shared across both fences in the preview.
 
 ```ivm
 @ns demo
@@ -30,4 +30,4 @@ Two fences share `@ns demo`. Move **Scale** in either place — the other follow
 @edge work -> work from=bottom-left to=top-left
 ```
 
-Open **Examples → p4-demo.md** — the picker should stay on `p4-demo.md`. Switch to **Graph editor**, select the Graph block, try **Copy fence** and **Reset env** after moving the sliders.
+Open **Examples → p4-demo.md** — the picker should stay on `p4-demo.md` while you scrub the shared controls.

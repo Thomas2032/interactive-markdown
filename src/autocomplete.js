@@ -28,7 +28,7 @@ const DIRECTIVE_COMPLETIONS = /** @type {Completion[]} */ ([
   { label: "@scrub", insert: "@scrub t duration=4", detail: "bind timer to CSS animation scrub" },
   { label: "@data", insert: "@data sales\nmonth, value\nJan, 40\nFeb, 55\n", detail: "CSV/table → name_col arrays" },
   { label: "@anchor", insert: "@anchor tip x=100 y=40", detail: "named SVG point → tip_x / tip_y" },
-  { label: "@graph", insert: "@graph layout=dagre\n@node a: \"A\"\n@node b: \"B\"\n@edge a -> b\n", detail: "node/edge graph (auto-layout)" },
+  { label: "@graph", insert: "@graph layout=dagre\n@node a: \"A\"\n@node b: \"B\"\n@edge a -> b\n", detail: "node/edge graph preview (auto-layout)" },
   { label: "@lane", insert: "@lane id: \"Lane\" y=0 height=120", detail: "graph swimlane" },
   { label: "@group", insert: "@group id: \"Group\"", detail: "graph node group" },
   { label: "@node", insert: "@node id: \"Label\" kind=action", detail: "graph node (omit x/y with layout=)" },

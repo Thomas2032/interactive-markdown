@@ -1,6 +1,6 @@
 # A small graph
 
-This fence is a directed graph. Drag a node to move it, and drag a dot on its top, right, bottom, or left onto another node to connect them. The source on the left updates when you let go.
+This fence is a directed graph. Edit `@node` / `@edge` in the source — the preview on the right shows the diagram.
 
 ```ivm
 @graph
@@ -15,4 +15,4 @@ This fence is a directed graph. Drag a node to move it, and drag a dot on its to
 @edge act -> output
 ```
 
-Double-click a label to rename it. Choose a kind, then add a node, or change the kind of the node you have selected. Delete removes the selected node or edge.
+Node `kind` can be `input`, `action` (default), `output`, or `decision`. Use `@graph layout=dagre` to auto-place nodes that omit both `x=` and `y=`.
