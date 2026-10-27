@@ -5,6 +5,7 @@
 import { mountDocumentEditor } from "./document-editor.js";
 import { renderDocument } from "./markdown.js";
 import { replaceIvmFence } from "./parse-ivm.js";
+import { attachAutocomplete } from "./autocomplete.js";
 
 const STORAGE_KEY = "interactive-markdown-draft-v1";
 
@@ -225,6 +226,7 @@ function init() {
 
   editor.value = start;
   editor.addEventListener("input", scheduleRender);
+  attachAutocomplete(editor, { onInsert: scheduleRender });
   tabSource?.addEventListener("click", () => showEditorTab("source"));
   tabGraph?.addEventListener("click", () => showEditorTab("graph"));
   showEditorTab("source");

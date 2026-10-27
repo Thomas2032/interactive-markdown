@@ -449,7 +449,10 @@ class Parser {
         depth: this.depth + 1,
       });
     }
-    throw new Error(`Unknown function: ${name}`);
+    const hint = suggestName(name, listKnownFunctionNames(this));
+    throw new Error(
+      hint ? `Unknown function: ${name} (did you mean \`${hint}\`?)` : `Unknown function: ${name}`
+    );
   }
 
   /**
@@ -577,7 +580,10 @@ class Parser {
       if (Object.prototype.hasOwnProperty.call(this.env, name)) {
         return this.env[name];
       }
-      throw new Error(`Unknown identifier: ${name}`);
+      const hint = suggestName(name, Object.keys(this.env).concat(Object.keys(CONSTANTS)));
+      throw new Error(
+        hint ? `Unknown identifier: ${name} (did you mean \`${hint}\`?)` : `Unknown identifier: ${name}`
+      );
     }
 
     if (t.type === "op" && t.value === "(") {
@@ -603,6 +609,80 @@ class Parser {
  * }} [options]
  * @returns {unknown}
  */
+
+/**
+ * @param {string} name
+ * @param {Iterable<string>} candidates
+ * @returns {string|null}
+ */
+export function suggestName(name, candidates) {
+  const target = String(name || "").toLowerCase();
+  if (!target) return null;
+  let best = null;
+  let bestScore = Infinity;
+  let bestRank = Infinity;
+  for (const raw of candidates) {
+    const c = String(raw);
+    if (!c) continue;
+    const lower = c.toLowerCase();
+    if (lower === target) return c;
+    const score = editDistance(target, lower);
+    // Prefer prefix / near-prefix matches on ties (sinn → sin over sign)
+    let rank = score * 10;
+    if (lower.startsWith(target) || target.startsWith(lower)) rank -= 3;
+    rank += Math.abs(lower.length - target.length);
+    if (score < bestScore || (score === bestScore && rank < bestRank)) {
+      bestScore = score;
+      bestRank = rank;
+      best = c;
+    }
+  }
+  // Allow small typos only
+  const maxDist = target.length <= 4 ? 1 : 2;
+  return bestScore <= maxDist ? best : null;
+}
+
+/**
+ * @param {string} a
+ * @param {string} b
+ */
+function editDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 99;
+  /** @type {number[]} */
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    /** @type {number[]} */
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Built-in whitelist function names (rad table; names identical in deg mode). */
+export const FUNCTION_NAMES = Object.freeze([
+  ...Object.keys(FUNCTIONS),
+  "map",
+  "reduce",
+].sort());
+
+/**
+ * @param {{ fns: Record<string, unknown>, userFns: Record<string, unknown> }} parser
+ */
+function listKnownFunctionNames(parser) {
+  return [
+    ...Object.keys(parser.fns || {}),
+    ...Object.keys(parser.userFns || {}),
+    "map",
+    "reduce",
+  ];
+}
+
 export function evaluate(source, env = {}, options = {}) {
   const tokens = tokenize(source);
   const parser = new Parser(tokens, env, options);
@@ -697,4 +777,4 @@ export function substitute(template, env = {}, errors, options = {}) {
   return out;
 }
 
-export { CONSTANTS, FUNCTIONS, buildFunctions };
+export { CONSTANTS, FUNCTIONS, buildFunctions, listKnownFunctionNames };
