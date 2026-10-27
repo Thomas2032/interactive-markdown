@@ -142,7 +142,7 @@ export function quoteGraphLabel(label) {
  * @returns {string}
  */
 export function serializeGraph(model) {
-  const lines = ["@graph"];
+  const lines = [model.layout ? `@graph layout=${model.layout}` : "@graph"];
   if (model.animated) lines.push(serializeAnimate(model.motion));
   for (const lane of model.lanes || []) {
     let line = `@lane ${lane.id}: ${quoteGraphLabel(lane.label)} y=${Math.round(lane.y)} height=${Math.round(lane.height)}`;
@@ -156,8 +156,13 @@ export function serializeGraph(model) {
     const kind = n.kind && n.kind !== "action" ? ` kind=${n.kind}` : "";
     const lane = n.lane ? ` lane=${n.lane}` : "";
     const group = n.group ? ` group=${n.group}` : "";
+    // Keep autoPos nodes coordinate-free when layout= is set so parse re-layouts.
+    const coords =
+      model.layout && n.autoPos
+        ? ""
+        : ` x=${Math.round(n.x)} y=${Math.round(n.y)}`;
     lines.push(
-      `@node ${n.id}: ${quoteGraphLabel(n.label)} x=${Math.round(n.x)} y=${Math.round(n.y)}${kind}${lane}${group}`
+      `@node ${n.id}: ${quoteGraphLabel(n.label)}${coords}${kind}${lane}${group}`
     );
   }
   for (const e of model.edges) lines.push(serializeEdge(e));
@@ -212,9 +217,12 @@ export function addNode(model, partial = {}) {
  */
 export function moveNode(model, id, x, y) {
   return carry(model, {
-    nodes: model.nodes.map((n) =>
-      n.id === id ? { ...n, x: snap(clamp(x, 0, 4000)), y: snap(clamp(y, 0, 4000)) } : { ...n }
-    ),
+    nodes: model.nodes.map((n) => {
+      if (n.id !== id) return { ...n };
+      const next = { ...n, x: snap(clamp(x, 0, 4000)), y: snap(clamp(y, 0, 4000)) };
+      delete next.autoPos; // drag makes position explicit
+      return next;
+    }),
     edges: model.edges.map((e) => ({ ...e })),
   });
 }
@@ -348,6 +356,7 @@ function carry(model, next) {
   if (next.motion == null && model && model.motion) next.motion = normalizeMotion(model.motion);
   if (next.lanes == null && model && model.lanes) next.lanes = model.lanes.map((l) => ({ ...l }));
   if (next.groups == null && model && model.groups) next.groups = model.groups.map((g) => ({ ...g }));
+  if (next.layout == null && model && model.layout) next.layout = model.layout;
   return next;
 }
 
