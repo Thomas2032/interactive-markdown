@@ -95,7 +95,15 @@
  *   graph: GraphModel|null,
  *   plot: PlotModel|null,
  *   errors: string[],
+ *   diagnostics: IvmDiagnostic[],
  * }} IvmBlock
+ * @typedef {{
+ *   line: number|null,
+ *   severity: 'error'|'warning',
+ *   code: string,
+ *   message: string,
+ *   hint?: string|null,
+ * }} IvmDiagnostic
  */
 
 const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
@@ -141,12 +149,56 @@ const KIND_ALIASES = Object.freeze({
   calc: "let",
 });
 
+const DIRECTIVE_NAMES = [
+  "ns", "slider", "timer", "input", "toggle", "let", "calc", "fn", "angle", "phase",
+  "svg", "plot", "axis", "series", "grid", "graph", "node", "edge", "animate",
+  "s", "t", "i", "b", "l", "f", "mode",
+];
+
+/**
+ * @param {string} name
+ * @returns {string|null}
+ */
+function suggestDirectiveName(name) {
+  const target = String(name || "").toLowerCase().replace(/^@/, "");
+  if (!target || DIRECTIVE_NAMES.includes(target)) return null;
+  let best = null;
+  let bestScore = Infinity;
+  for (const c of DIRECTIVE_NAMES) {
+    const score = directiveEditDistance(target, c);
+    if (score < bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  const maxDist = target.length <= 4 ? 1 : 2;
+  return bestScore <= maxDist ? best : null;
+}
+
+/** @param {string} a @param {string} b */
+function directiveEditDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 99;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+
 /**
  * @param {string} line
- * @param {string[]} errors
+ * @param {(message: string, opts?: { hint?: string|null, code?: string }) => void} reportFn
  * @returns {GraphMotion}
  */
-function readAnimate(line, errors) {
+function readAnimate(line, reportFn) {
   /** @type {GraphMotion} */
   const motion = { path: "ortho", quantity: 1, direction: "forward", speed: 2.8 };
   const rest = line.replace(/^@animate\b/i, "").trim();
@@ -154,7 +206,7 @@ function readAnimate(line, errors) {
   for (const part of rest.split(/\s+/)) {
     const flag = part.match(/^(path|quantity|direction|speed)=(\S+)$/i);
     if (!flag) {
-      errors.push(`@animate: unknown ${part}`);
+      reportFn(`@animate: unknown ${part}`, { code: "animate" });
       continue;
     }
     const key = flag[1].toLowerCase();
@@ -162,31 +214,43 @@ function readAnimate(line, errors) {
     const value = raw.toLowerCase();
     if (key === "path") {
       if (value !== "ortho" && value !== "straight" && value !== "curve") {
-        errors.push(`@animate: unknown path ${raw}`);
+        reportFn(`@animate: unknown path ${raw}`, {
+          code: "animate",
+          hint: "use path=ortho|straight|curve",
+        });
       } else motion.path = value;
     } else if (key === "quantity") {
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) && Number.isNaN(Number(raw))) {
         motion.quantityFrom = raw;
       } else {
         const n = Number(raw);
-        if (!Number.isInteger(n) || n < 1 || n > 12) errors.push("@animate: quantity must be 1..12 or a control name");
-        else motion.quantity = n;
+        if (!Number.isInteger(n) || n < 1 || n > 12) {
+          reportFn("@animate: quantity must be 1..12 or a control name", { code: "animate" });
+        } else motion.quantity = n;
       }
     } else if (key === "direction") {
-      if (value !== "forward" && value !== "reverse") errors.push(`@animate: unknown direction ${raw}`);
-      else motion.direction = value;
+      if (value !== "forward" && value !== "reverse") {
+        reportFn(`@animate: unknown direction ${raw}`, {
+          code: "animate",
+          hint: "use direction=forward|reverse",
+        });
+      } else motion.direction = value;
     } else if (key === "speed") {
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw) && Number.isNaN(Number(raw))) {
         motion.speedFrom = raw;
       } else {
         const n = Number(raw);
-        if (!Number.isFinite(n) || n < 0.2 || n > 30) errors.push("@animate: speed must be seconds from 0.2 to 30 or a control name");
-        else motion.speed = Math.round(n * 10) / 10;
+        if (!Number.isFinite(n) || n < 0.2 || n > 30) {
+          reportFn("@animate: speed must be seconds from 0.2 to 30 or a control name", {
+            code: "animate",
+          });
+        } else motion.speed = Math.round(n * 10) / 10;
       }
     }
   }
   return motion;
 }
+
 
 /**
  * Read a leading "quoted" or 'quoted' string. Supports backslash escapes.
@@ -272,6 +336,24 @@ function parseRange(raw) {
  */
 export function parseIvm(body) {
   const errors = [];
+  /** @type {IvmDiagnostic[]} */
+  const diagnostics = [];
+
+  /**
+   * @param {number|null} lineNo 1-based fence line
+   * @param {string} message
+   * @param {{ hint?: string|null, code?: string, severity?: 'error'|'warning' }} [opts]
+   */
+  function report(lineNo, message, opts = {}) {
+    const severity = opts.severity || "error";
+    const hint = opts.hint || null;
+    const code = opts.code || "parse";
+    diagnostics.push({ line: lineNo, severity, code, message, hint });
+    const loc = lineNo != null ? `line ${lineNo}: ` : "";
+    const h = hint ? ` (hint: ${hint})` : "";
+    errors.push(`${loc}${message}${h}`);
+  }
+
   /** @type {Control[]} */
   const controls = [];
   /** @type {IvmFn[]} */
@@ -305,17 +387,20 @@ export function parseIvm(body) {
     // @plot [WxH] [grid|nogrid] [legend|nolegend] [lockAspect]
     if (/^@plot\b/i.test(line)) {
       if (plot) {
-        errors.push("Duplicate @plot");
+        report(i + 1, "Duplicate @plot");
         i++;
         continue;
       }
       if (graph) {
-        errors.push("@plot cannot mix with @graph");
+        report(i + 1, "@plot cannot mix with @graph", {
+          code: "mode-mix",
+          hint: "use separate fences, or drop @graph",
+        });
         i++;
         continue;
       }
       if (templateSvg) {
-        errors.push("@plot must come before @svg (overlay follows the plot)");
+        report(i + 1, "@plot must come before @svg (overlay follows the plot)");
         i++;
         continue;
       }
@@ -346,7 +431,7 @@ export function parseIvm(body) {
         const leftover = flags
           .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect)\b/gi, "")
           .trim();
-        if (leftover) errors.push(`@plot: unknown ${leftover}`);
+        if (leftover) report(i + 1, `@plot: unknown ${leftover}`);
       }
       i++;
       continue;
@@ -355,14 +440,14 @@ export function parseIvm(body) {
     // @grid on|off
     if (/^@grid\b/i.test(line)) {
       if (!plot) {
-        errors.push("@grid is only valid after @plot");
+        report(i + 1, "@grid is only valid after @plot");
         i++;
         continue;
       }
       const rest = line.replace(/^@grid\b/i, "").trim().toLowerCase();
       if (rest === "off" || rest === "false" || rest === "0" || rest === "nogrid") plot.grid = false;
       else if (rest === "on" || rest === "true" || rest === "1" || rest === "grid" || rest === "") plot.grid = true;
-      else errors.push(`@grid: expected on|off, got ${rest}`);
+      else report(i + 1, `@grid: expected on|off, got ${rest}`);
       i++;
       continue;
     }
@@ -372,7 +457,7 @@ export function parseIvm(body) {
       const m = line.match(/^@axis\s+([xy])\s*:\s*(.+)$/i);
       if (m) {
         if (!plot) {
-          errors.push(`@axis ${m[1]}: only valid after @plot`);
+          report(i + 1, `@axis ${m[1]}: only valid after @plot`);
           i++;
           continue;
         }
@@ -382,7 +467,7 @@ export function parseIvm(body) {
           /^(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\.\.(-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\s*(.*)$/
         );
         if (!rm) {
-          errors.push(`@axis ${which}: expected min..max [step=S] [scale=…]`);
+          report(i + 1, `@axis ${which}: expected min..max [step=S] [scale=…]`);
           i++;
           continue;
         }
@@ -401,19 +486,22 @@ export function parseIvm(body) {
         if (scaleRaw === "linear" || scaleRaw === "log" || scaleRaw === "symlog") {
           axis.scale = scaleRaw;
         } else {
-          errors.push(`@axis ${which}: unknown scale ${flags.scale}`);
+          report(i + 1, `@axis ${which}: unknown scale ${flags.scale}`, {
+            code: "axis-scale",
+            hint: "scale=linear|log|symlog",
+          });
           axis.scale = "linear";
         }
         if (flags.linthresh !== undefined) {
           const lt = Number(flags.linthresh);
           if (Number.isFinite(lt) && lt > 0) axis.linthresh = lt;
-          else errors.push(`@axis ${which}: linthresh must be > 0`);
+          else report(i + 1, `@axis ${which}: linthresh must be > 0`);
         }
         if (which === "x") {
-          if (plot.x) errors.push("Duplicate @axis x");
+          if (plot.x) report(i + 1, "Duplicate @axis x");
           plot.x = axis;
         } else {
-          if (plot.y) errors.push("Duplicate @axis y");
+          if (plot.y) report(i + 1, "Duplicate @axis y");
           plot.y = axis;
         }
         i++;
@@ -424,7 +512,7 @@ export function parseIvm(body) {
     // @series [id] [flags] [y|x|r = expr] — continuations: y=/x=/r=/t=/theta=
     if (/^@series\b/i.test(line)) {
       if (!plot) {
-        errors.push("@series is only valid after @plot");
+        report(i + 1, "@series is only valid after @plot");
         i++;
         continue;
       }
@@ -466,14 +554,14 @@ export function parseIvm(body) {
         if (tr) {
           series.tMin = tr[0];
           series.tMax = tr[1];
-        } else errors.push(`@series: bad t range ${flags.t}`);
+        } else report(i + 1, `@series: bad t range ${flags.t}`);
       }
       if (flags.theta !== undefined) {
         const tr = parseRange(flags.theta);
         if (tr) {
           series.tMin = tr[0];
           series.tMax = tr[1];
-        } else errors.push(`@series: bad theta range ${flags.theta}`);
+        } else report(i + 1, `@series: bad theta range ${flags.theta}`);
       }
       // Continuations on following lines
       let j = i + 1;
@@ -495,7 +583,7 @@ export function parseIvm(body) {
           if (tr) {
             series.tMin = tr[0];
             series.tMax = tr[1];
-          } else errors.push(`@series: bad ${key} range ${value}`);
+          } else report(i + 1, `@series: bad ${key} range ${value}`);
         }
         i = j;
         j++;
@@ -505,7 +593,7 @@ export function parseIvm(body) {
         series.kind = "polar";
         if (series.tMin === undefined) series.tMin = 0;
         if (series.tMax === undefined) series.tMax = Math.PI * 2;
-        if (!series.rExpression) errors.push("@series: polar needs r = expression");
+        if (!series.rExpression) report(i + 1, "@series: polar needs r = expression");
       } else if (series.xExpression && (series.expression || series.yExpression)) {
         series.kind = "parametric";
         if (series.expression && !series.yExpression) {
@@ -517,9 +605,12 @@ export function parseIvm(body) {
       } else if (series.expression) {
         series.kind = "y";
       } else if (series.xExpression && !series.expression) {
-        errors.push("@series: parametric needs both x = and y =");
+        report(i + 1, "@series: parametric needs both x = and y =");
       } else {
-        errors.push("@series: expected y = expression (or x=/y= parametric, or r= polar)");
+        report(i + 1, "@series: expected y = expression (or x=/y= parametric, or r= polar)", {
+          code: "series-kind",
+          hint: "Cartesian: y = …; parametric: x = … and y = … with t=min..max; polar: r = … with theta=min..max",
+        });
       }
       if (series.kind) plot.series.push(series);
       i++;
@@ -528,14 +619,17 @@ export function parseIvm(body) {
 
     // @graph — following @node / @edge lines are an editable graph
     if (/^@graph$/i.test(line)) {
-      if (plot) errors.push("@graph cannot mix with @plot");
-      else if (graph) errors.push("Duplicate @graph");
+      if (plot) report(i + 1, "@graph cannot mix with @plot", {
+        code: "mode-mix",
+        hint: "use separate fences, or drop @plot",
+      });
+      else if (graph) report(i + 1, "Duplicate @graph");
       else graph = { nodes: [], edges: [] };
       i++;
       continue;
     }
     if (/^@graph\b/i.test(line)) {
-      errors.push("@graph takes no arguments");
+      report(i + 1, "@graph takes no arguments");
       i++;
       continue;
     }
@@ -546,18 +640,18 @@ export function parseIvm(body) {
       if (m) {
         const id = m[1];
         if (!graph) {
-          errors.push(`@node ${id}: only valid after @graph`);
+          report(i + 1, `@node ${id}: only valid after @graph`);
           i++;
           continue;
         }
         const quoted = parseQuotedPrefix(m[2]);
         if (!quoted) {
-          errors.push(`@node ${id}: expected "Label" x=N y=N`);
+          report(i + 1, `@node ${id}: expected "Label" x=N y=N`);
           i++;
           continue;
         }
         if (graph.nodes.some((n) => n.id === id)) {
-          errors.push(`@node ${id}: duplicate id`);
+          report(i + 1, `@node ${id}: duplicate id`);
           i++;
           continue;
         }
@@ -566,7 +660,10 @@ export function parseIvm(body) {
         const y = flags.y !== undefined ? Number(flags.y) : 48;
         const rawKind = flags.kind !== undefined ? String(flags.kind).toLowerCase() : "action";
         if (!NODE_KINDS.has(rawKind)) {
-          errors.push(`@node ${id}: unknown kind ${flags.kind}`);
+          report(i + 1, `@node ${id}: unknown kind ${flags.kind}`, {
+            code: "node-kind",
+            hint: "kind=action|input|output|decision",
+          });
         }
         graph.nodes.push({
           id,
@@ -589,17 +686,17 @@ export function parseIvm(body) {
         const from = m[1];
         const to = m[2];
         if (!graph) {
-          errors.push(`@edge ${from} -> ${to}: only valid after @graph`);
+          report(i + 1, `@edge ${from} -> ${to}: only valid after @graph`);
           i++;
           continue;
         }
         if (!graph.nodes.some((n) => n.id === from) || !graph.nodes.some((n) => n.id === to)) {
-          errors.push(`@edge ${from} -> ${to}: unknown node`);
+          report(i + 1, `@edge ${from} -> ${to}: unknown node`);
           i++;
           continue;
         }
         if (graph.edges.some((e) => e.from === from && e.to === to)) {
-          errors.push(`@edge ${from} -> ${to}: duplicate edge`);
+          report(i + 1, `@edge ${from} -> ${to}: duplicate edge`);
           i++;
           continue;
         }
@@ -611,13 +708,16 @@ export function parseIvm(body) {
           for (const part of tail.split(/\s+/)) {
             const flag = part.match(/^(from|to)=(\S+)$/i);
             if (!flag) {
-              errors.push(`@edge ${from} -> ${to}: unknown ${part}`);
+              report(i + 1, `@edge ${from} -> ${to}: unknown ${part}`);
               sideError = true;
               continue;
             }
             const side = parseGraphSide(flag[2]);
             if (!side) {
-              errors.push(`@edge ${from} -> ${to}: unknown side ${flag[2]}`);
+              report(i + 1, `@edge ${from} -> ${to}: unknown side ${flag[2]}`, {
+                code: "edge-side",
+                hint: "left|right|top|bottom|top-left|top-right|bottom-left|bottom-right (tl|tr|bl|br)",
+              });
               sideError = true;
               continue;
             }
@@ -634,11 +734,11 @@ export function parseIvm(body) {
     }
 
     if (/^@animate\b/i.test(line)) {
-      if (!graph) errors.push("@animate is only valid after @graph");
-      else if (graph.animated) errors.push("Duplicate @animate");
+      if (!graph) report(i + 1, "@animate is only valid after @graph");
+      else if (graph.animated) report(i + 1, "Duplicate @animate");
       else {
         graph.animated = true;
-        graph.motion = readAnimate(line, errors);
+        graph.motion = readAnimate(line, (message, opts) => report(i + 1, message, opts));
       }
       i++;
       continue;
@@ -650,7 +750,10 @@ export function parseIvm(body) {
     // @svg [WxH] — remainder of fence is SVG markup (overlay when @plot is set)
     if (/^@svg\b/i.test(line)) {
       if (graph) {
-        errors.push("@svg cannot mix with @graph");
+        report(i + 1, "@svg cannot mix with @graph", {
+          code: "mode-mix",
+          hint: "use @plot + overlay @svg, or a separate fence",
+        });
         i++;
         continue;
       }
@@ -710,9 +813,9 @@ export function parseIvm(body) {
         const min = Number(m[2]);
         const max = Number(m[3]);
         if (!Number.isFinite(min) || !Number.isFinite(max)) {
-          errors.push(`@phase ${name}: invalid range`);
+          report(i + 1, `@phase ${name}: invalid range`);
         } else if (phases.some((p) => p.name === name)) {
-          errors.push(`@phase ${name}: duplicate phase`);
+          report(i + 1, `@phase ${name}: duplicate phase`);
         } else {
           phases.push({ name, min, max });
         }
@@ -736,12 +839,12 @@ export function parseIvm(body) {
           for (const part of paramsRaw.split(",")) {
             const p = part.trim();
             if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(p)) {
-              errors.push(`@fn ${name}: bad param ${part.trim()}`);
+              report(i + 1, `@fn ${name}: bad param ${part.trim()}`);
               params.length = 0;
               break;
             }
             if (params.includes(p)) {
-              errors.push(`@fn ${name}: duplicate param ${p}`);
+              report(i + 1, `@fn ${name}: duplicate param ${p}`);
               params.length = 0;
               break;
             }
@@ -749,11 +852,11 @@ export function parseIvm(body) {
           }
         }
         if (fns.some((f) => f.name === name)) {
-          errors.push(`@fn ${name}: duplicate function`);
+          report(i + 1, `@fn ${name}: duplicate function`);
         } else if (expression) {
           fns.push({ name, params, expression });
         } else {
-          errors.push(`@fn ${name}: missing body`);
+          report(i + 1, `@fn ${name}: missing body`);
         }
         i++;
         continue;
@@ -781,7 +884,7 @@ export function parseIvm(body) {
           /^(-?[0-9]*\.?[0-9]+)\.\.(-?[0-9]*\.?[0-9]+)\s*(?:=\s*(-?[0-9]*\.?[0-9]+))?\s*(.*)$/
         );
         if (!rm) {
-          errors.push(`@${kind} ${name}: expected min..max [= default]`);
+          report(i + 1, `@${kind} ${name}: expected min..max [= default]`);
           i++;
           continue;
         }
@@ -846,12 +949,20 @@ export function parseIvm(body) {
       }
     }
 
-    if (graph) errors.push(`Not allowed inside @graph: ${line}`);
-    else errors.push(`Unrecognized line: ${line}`);
+    if (graph) {
+      report(i + 1, `Not allowed inside @graph: ${line}`, { code: "graph-context" });
+    } else {
+      const at = line.match(/^@([A-Za-z_][A-Za-z0-9_]*)/);
+      const sug = at ? suggestDirectiveName(at[1]) : null;
+      report(i + 1, `Unrecognized line: ${line}`, {
+        code: at ? "unknown-directive" : "unrecognized",
+        hint: sug ? `did you mean @${sug}?` : (at ? "check the IVM directive list (@plot, @svg, @graph, @slider, …)" : null),
+      });
+    }
     i++;
   }
 
-  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, errors };
+  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, errors, diagnostics };
 }
 
 /**

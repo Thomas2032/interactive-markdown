@@ -24,6 +24,9 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - **Editor polish**: Examples picker stays on the loaded file; Graph editor blocks offer **Copy fence** / **Reset env**; inspector labels **Namespace (@ns)** with short help
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
+- **Diagnostics** with line numbers and hints (unknown directives/functions, degree footguns)
+- **`ivm check` CLI** (`npm run check -- file.md` or `--json`) for agents to validate-and-rewrite
+- **Source autocomplete** for `@` directives, whitelist functions, ports, and series kinds
 - SVG sanitizer (strips scripts, event handlers, remote hrefs; allows same-origin / relative paths and `data:` images/fonts)
 
 ## Quick start
@@ -230,6 +233,7 @@ Load from the toolbar **Examples…** menu, or open the files directly. Short in
 - [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
 - [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
 - [`examples/p1-demo.md`](examples/p1-demo.md) — graph controls, self-edges, corner ports, shared env, plot tooltips
+- [`examples/p1-diagnostics-demo.md`](examples/p1-diagnostics-demo.md) — soft errors, degree hints, `ivm check` CLI
 - [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
 - [`examples/p4-demo.md`](examples/p4-demo.md) — `@ns` sharing, picker sync, Copy fence / Reset env
 
@@ -249,6 +253,10 @@ src/
   render.js         Controls + SVG binding
   graph-editor.js   Graph model and canvas editor
   plot.js           Cartesian XY plot SVG builder
+  diagnostics.js    Structured fence diagnostics
+  autocomplete.js   Source-tab completions
+bin/
+  ivm-check.mjs     CLI: validate ```ivm fences
 styles/app.css
 examples/
 test/               Node smoke tests
@@ -260,7 +268,7 @@ test/               Node smoke tests
 npm test
 ```
 
-Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, XY plots, and preview document builder (`linkedom` is used where a DOM is required).
+Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, XY plots, preview document builder, diagnostics/CLI, and autocomplete (`linkedom` is used where a DOM is required).
 
 ## License
 

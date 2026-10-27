@@ -7,3 +7,6 @@ export { sanitizeSvg } from "./sanitize-svg.js";
 export { mountIvm, resetNamespaces } from "./render.js";
 export { renderDocument } from "./markdown.js";
 export { buildPlotSvg, normalizePlot } from "./plot.js";
+export { diagnoseFence, diagnoseMarkdown, formatDiagnostic } from "./diagnostics.js";
+export { completionsAt, attachAutocomplete } from "./autocomplete.js";
+export { suggestName, FUNCTION_NAMES } from "./expr.js";
