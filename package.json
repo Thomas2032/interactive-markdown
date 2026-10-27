@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
-  "version": "0.10.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, @graph layout=dagre, @data tables\u2192series, remap/px/py + @anchor helpers, bar/scatter, @scrub, diagnostics + ivm check",
+  "version": "0.10.1",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, @graph layout=dagre, @data tables→series, remap/px/py + @anchor helpers, bar/scatter, @scrub, diagnostics + ivm check",
   "main": "./src/index.js",
   "directories": {
     "example": "examples",
@@ -73,6 +73,6 @@
     "node": ">=18"
   },
   "bin": {
-    "ivm-check": "./bin/ivm-check.mjs"
+    "ivm-check": "bin/ivm-check.mjs"
   }
 }
