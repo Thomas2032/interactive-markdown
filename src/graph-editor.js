@@ -42,10 +42,12 @@ const DEFAULT_SPEED = 2.8;
  * @typedef {"left"|"right"|"top"|"bottom"|"top-left"|"top-right"|"bottom-left"|"bottom-right"} GraphSide
  * @typedef {"ortho"|"straight"|"curve"} GraphPath
  * @typedef {"forward"|"reverse"} GraphDirection
- * @typedef {{ id: string, label: string, x: number, y: number, kind: string }} GraphNode
+ * @typedef {{ id: string, label: string, x: number, y: number, kind: string, lane?: string, group?: string }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: GraphPath, quantity: number, direction: GraphDirection, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion }} GraphModel
+ * @typedef {{ id: string, label: string, y: number, height: number, fill?: string }} GraphLane
+ * @typedef {{ id: string, label: string }} GraphGroup
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[] }} GraphModel
  * @typedef {{ type: 'node', id: string } | { type: 'edge', index: number }} GraphSelection
  */
 
@@ -142,10 +144,20 @@ export function quoteGraphLabel(label) {
 export function serializeGraph(model) {
   const lines = ["@graph"];
   if (model.animated) lines.push(serializeAnimate(model.motion));
+  for (const lane of model.lanes || []) {
+    let line = `@lane ${lane.id}: ${quoteGraphLabel(lane.label)} y=${Math.round(lane.y)} height=${Math.round(lane.height)}`;
+    if (lane.fill) line += ` fill=${lane.fill}`;
+    lines.push(line);
+  }
+  for (const group of model.groups || []) {
+    lines.push(`@group ${group.id}: ${quoteGraphLabel(group.label)}`);
+  }
   for (const n of model.nodes) {
     const kind = n.kind && n.kind !== "action" ? ` kind=${n.kind}` : "";
+    const lane = n.lane ? ` lane=${n.lane}` : "";
+    const group = n.group ? ` group=${n.group}` : "";
     lines.push(
-      `@node ${n.id}: ${quoteGraphLabel(n.label)} x=${Math.round(n.x)} y=${Math.round(n.y)}${kind}`
+      `@node ${n.id}: ${quoteGraphLabel(n.label)} x=${Math.round(n.x)} y=${Math.round(n.y)}${kind}${lane}${group}`
     );
   }
   for (const e of model.edges) lines.push(serializeEdge(e));
@@ -325,6 +337,8 @@ function cloneModel(model) {
   return carry(model, {
     nodes: model.nodes.map((n) => ({ ...n })),
     edges: model.edges.map((e) => ({ ...e })),
+    lanes: (model.lanes || []).map((l) => ({ ...l })),
+    groups: (model.groups || []).map((g) => ({ ...g })),
   });
 }
 
@@ -332,6 +346,8 @@ function cloneModel(model) {
 function carry(model, next) {
   if (model && model.animated) next.animated = true;
   if (next.motion == null && model && model.motion) next.motion = normalizeMotion(model.motion);
+  if (next.lanes == null && model && model.lanes) next.lanes = model.lanes.map((l) => ({ ...l }));
+  if (next.groups == null && model && model.groups) next.groups = model.groups.map((g) => ({ ...g }));
   return next;
 }
 
@@ -772,6 +788,10 @@ export function mountGraphEditor(container, initial, options = {}) {
       w = Math.max(w, n.x + NODE_W + 40);
       h = Math.max(h, n.y + NODE_H + 48);
     }
+    for (const lane of model.lanes || []) {
+      h = Math.max(h, lane.y + lane.height + 24);
+      w = Math.max(w, 640);
+    }
     return { w, h };
   }
 
@@ -885,10 +905,56 @@ export function mountGraphEditor(container, initial, options = {}) {
     stage.style.height = size.h + "px";
     stage.classList.toggle("is-animated", !!resolvedMotion());
     empty.hidden = model.nodes.length > 0;
-    for (const el of stage.querySelectorAll(".im-graph-node")) el.remove();
+    for (const el of stage.querySelectorAll(".im-graph-node, .im-graph-lane, .im-graph-group")) el.remove();
+    for (const lane of model.lanes || []) stage.appendChild(renderLane(lane));
+    for (const group of model.groups || []) {
+      const el = renderGroup(group);
+      if (el) stage.appendChild(el);
+    }
     for (const n of model.nodes) stage.appendChild(renderNode(n));
     paintEdges();
     syncChrome();
+  }
+
+  /** @param {GraphLane} lane */
+  function renderLane(lane) {
+    const el = doc.createElement("div");
+    el.className = "im-graph-lane";
+    el.dataset.id = lane.id;
+    el.style.top = lane.y + "px";
+    el.style.height = lane.height + "px";
+    if (lane.fill) el.style.background = lane.fill;
+    const label = doc.createElement("span");
+    label.className = "im-graph-lane-label";
+    label.textContent = lane.label || lane.id;
+    el.appendChild(label);
+    return el;
+  }
+
+  /** @param {GraphGroup} group */
+  function renderGroup(group) {
+    const members = model.nodes.filter((n) => n.group === group.id);
+    if (!members.length) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of members) {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + NODE_W);
+      maxY = Math.max(maxY, n.y + NODE_H);
+    }
+    const pad = 16;
+    const el = doc.createElement("div");
+    el.className = "im-graph-group";
+    el.dataset.id = group.id;
+    el.style.left = minX - pad + "px";
+    el.style.top = minY - pad + "px";
+    el.style.width = maxX - minX + pad * 2 + "px";
+    el.style.height = maxY - minY + pad * 2 + "px";
+    const label = doc.createElement("span");
+    label.className = "im-graph-group-label";
+    label.textContent = group.label || group.id;
+    el.appendChild(label);
+    return el;
   }
 
   function focusCanvas() {

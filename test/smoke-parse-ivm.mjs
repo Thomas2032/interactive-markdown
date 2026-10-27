@@ -190,5 +190,19 @@ const badFn = parseIvm(`@fn sin(x) = x\n@svg\n<svg/>\n`);
 assert("duplicate builtin fn still parses", badFn.fns.some((f) => f.name === "sin"));
 
 
+const scrub = parseIvm(`@scrub t duration=4 selector=.ball
+@svg 10x10
+<svg/>
+`);
+assert("scrub directive", scrub.scrub?.name === "t" && scrub.scrub.selector === ".ball");
+
+
+const annMid = parseIvm(`@plot
+@annotate x=1 y=55 "best month" dy=-14
+`);
+assert("annotate mid-quote text", annMid.errors.length === 0 && annMid.plot?.annotations?.[0]?.text === "best month");
+assert("annotate mid-quote dy", annMid.plot?.annotations?.[0]?.dy === -14);
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

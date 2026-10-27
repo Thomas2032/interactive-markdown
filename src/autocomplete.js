@@ -23,7 +23,12 @@ const DIRECTIVE_COMPLETIONS = /** @type {Completion[]} */ ([
   { label: "@axis", insert: "@axis x: 0..1 step=0.2", detail: "plot axis" },
   { label: "@series", insert: "@series\n  y = ", detail: "plot series" },
   { label: "@grid", insert: "@grid on", detail: "plot grid on|off" },
+  { label: "@legend", insert: "@legend pos=top-right", detail: "legend position" },
+  { label: "@annotate", insert: "@annotate x=0 y=0 \"note\"", detail: "plot callout" },
+  { label: "@scrub", insert: "@scrub t duration=4", detail: "bind timer to CSS animation scrub" },
   { label: "@graph", insert: "@graph\n@node a: \"A\" x=40 y=40\n@node b: \"B\" x=240 y=40\n@edge a -> b\n", detail: "node/edge graph" },
+  { label: "@lane", insert: "@lane id: \"Lane\" y=0 height=120", detail: "graph swimlane" },
+  { label: "@group", insert: "@group id: \"Group\"", detail: "graph node group" },
   { label: "@node", insert: "@node id: \"Label\" x=40 y=40 kind=action", detail: "graph node" },
   { label: "@edge", insert: "@edge from -> to", detail: "graph edge" },
   { label: "@animate", insert: "@animate path=curve quantity=3 speed=2.4 direction=forward", detail: "graph motion" },
@@ -33,6 +38,8 @@ const SERIES_KIND_COMPLETIONS = /** @type {Completion[]} */ ([
   { label: "y =", insert: "y = ", detail: "Cartesian series (free var x)" },
   { label: "x = / y =", insert: "x = cos(t)\n  y = sin(t)\n  t = 0..6.2832", detail: "parametric" },
   { label: "r = / theta =", insert: "r = 1\n  theta = 0..6.2832", detail: "polar" },
+  { label: "kind=bar", insert: "kind=bar\n  cats = A, B, C\n  y = [10, 20, 15]", detail: "bar chart" },
+  { label: "kind=scatter", insert: "kind=scatter marker=circle\n  x = [1, 2, 3]\n  y = [2, 5, 3]", detail: "scatter points" },
 ]);
 
 const PORT_COMPLETIONS = /** @type {Completion[]} */ (

@@ -524,6 +524,7 @@ body {
 }
 
 .im-graph-edges {
+  z-index: 3;
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1104,4 +1105,52 @@ body {
   color: #fde68a;
   background: #422006;
   border-color: #a16207;
+}
+
+
+/* Graph lanes / groups (P3) */
+.im-graph-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  pointer-events: none;
+  z-index: 0;
+}
+.im-graph-lane-label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.im-graph-group {
+  position: absolute;
+  border-radius: 14px;
+  border: 2px solid #a78bfa;
+  background: rgba(167, 139, 250, 0.08);
+  pointer-events: none;
+  z-index: 0;
+}
+.im-graph-group-label {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6d28d9;
+  background: #fff;
+  border-radius: 4px;
+}
+.im-graph-stage .im-graph-node {
+  z-index: 2;
+}
+.im-svg-host[title*="zoom"] {
+  cursor: grab;
 }

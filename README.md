@@ -14,17 +14,18 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
 - Pure `@fn` macros, arrays (`range` / `map` / `reduce`), and fence `@angle deg|rad` trig mode
-- Named `@phase` spans + timer scrub helpers (`inPhase` / `phaseT` / `phaseAt`)
+- Named `@phase` spans + timer helpers (`inPhase` / `phaseT` / `phaseAt`)
+- First-class **`@scrub`** — bind a timer/slider to CSS animation scrubbing on `.im-scrub` (no DIY `animation-delay`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
-- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **log/symlog** axes, **legends**, **parametric/polar** series, optional **SVG overlay**, and **hover tooltips**
-- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**; edits write back into the fence)
+- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **bar / scatter / categorical**, **dual y2 axes**, **zoom/pan**, **log/symlog**, **legends** (position), **`@annotate`**, **parametric/polar**, optional **SVG overlay**, and **hover tooltips**
+- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**, **`@lane` / `@group`**; edits write back into the fence)
 - **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
 - **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
 - **Editor polish**: Examples picker stays on the loaded file; Graph editor blocks offer **Copy fence** / **Reset env**; inspector labels **Namespace (@ns)** with short help
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
-- **Diagnostics** with line numbers and hints (unknown directives/functions, degree footguns)
+- **Diagnostics** with line numbers and hints (unknown directives/functions, degree footguns, **`@ns` typo / case warnings** across fences)
 - **`ivm check` CLI** (`npm run check -- file.md` or `--json`) for agents to validate-and-rewrite
 - **Source autocomplete** for `@` directives, whitelist functions, ports, and series kinds
 - SVG sanitizer (strips scripts, event handlers, remote hrefs; allows same-origin / relative paths and `data:` images/fonts)
@@ -105,12 +106,17 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is full SVG markup |
 | `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
-| `@plot [WxH] [grid\|nogrid] [legend\|nolegend] [lockAspect]` | XY plot (optional trailing `@svg` overlay; exclusive of `@graph`) |
-| `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Plot axis range, scale, and label |
-| `@series [id] …` / `y=` / `x=`+`y=` / `r=` | Plot series (Cartesian, parametric, or polar) |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom]` | XY plot (optional trailing `@svg` overlay; exclusive of `@graph`) |
+| `@axis x\|y\|y2: min..max [step=S] [scale=linear\|log\|symlog\|categorical] [cats=A,B] ["Label"]` | Plot axis (use `y2` for dual axis; `cats=` for categorical) |
+| `@series [id] [kind=y\|bar\|scatter\|…] [axis=y\|y2] [marker=…] …` | Plot series (Cartesian, bar, scatter, parametric, or polar) |
+| `@legend pos=top-right\|top-left\|bottom-right\|bottom-left` | Legend placement |
+| `@annotate x=N y=N "text" [dx=] [dy=] [axis=y\|y2]` | Callout without hand-written SVG |
+| `@scrub name duration=N [selector=.im-scrub]` | Pause CSS animations and bind `animation-delay` to a control |
 | `@grid on\|off` | Plot grid toggle |
-| `@graph` | Start an editable directed graph. This is the first directive in that fence |
-| `@node id: "Label" x=N y=N kind=K` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
+| `@graph` | Start an editable directed graph |
+| `@lane id: "Label" y=N [height=H] [fill=#hex]` | Horizontal swimlane behind nodes |
+| `@group id: "Label"` | Named group; nodes with `group=id` get a bounding box |
+| `@node id: "Label" x=N y=N kind=K [lane=id] [group=id]` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
 | `@edge from -> to` | Directed edge (self-edges allowed). Sides: `top\|right\|bottom\|left\|top-left\|top-right\|bottom-left\|bottom-right` (aliases `tl\|tr\|bl\|br`). Defaults `from=right`, `to=left` |
 | `@animate` | Marching dashes / traveling dots. Options: `path=ortho\|straight\|curve`, `quantity=N\|name`, `direction=forward\|reverse`, `speed=seconds\|name` |
 
@@ -179,9 +185,9 @@ Series `id` or `label="…"` feeds the legend (default on; `nolegend` to hide). 
 
 | Line | Meaning |
 |------|---------|
-| `@plot [WxH] [grid\|nogrid] [legend\|nolegend] [lockAspect]` | Start an XY plot (default size 480×320, grid on, legend on when labels exist) |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom]` | Start an XY plot (default 480×320; `zoom` enables wheel zoom / drag pan) |
 | `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Axis range, scale, tick step, and title |
-| `@series [id] [stroke=#…] [fill=#…] [fillOpacity=N] [width=N] ["Label"]` | Curve style; body is `y =`, or `x=`+`y=`+`t=`, or `r=`+`theta=` |
+| `@series [id] [kind=…] [axis=y\|y2] [marker=…] [stroke=#…] [fill=#…] …` | Series style; body is `y=`, `kind=bar`+`cats=`+`y=`, `kind=scatter`+`x=`/`y=`, parametric, or polar |
 | `@grid on\|off` | Toggle the background grid |
 | `@svg` (after `@plot`) | Overlay markup in the plot viewBox (`0 0 W H`) with `{{expr}}` |
 
@@ -203,7 +209,8 @@ Arrays: `[1, 2, x]`, `range(a, b, step?)`, `map(arr, fnName|"expr with _")`, `re
 - With `@angle deg` on the fence: `sin` / `cos` / `tan` / inverses use **degrees** (documented footgun fix)
 - `sind` / `cosd` / `tand` always take **degrees**, regardless of `@angle`
 - Optional `deg` / `rad` flag on a range line is still stored as metadata (`units`)
-- `@phase name: min..max` + `inPhase(t,"name")` / `phaseT(t,"name")` / `phaseAt(t)` for timeline scrubbing with `@timer`
+- `@phase name: min..max` + `inPhase(t,"name")` / `phaseT(t,"name")` / `phaseAt(t)` for timeline phases with `@timer`
+- `@scrub t duration=4` + CSS class `im-scrub` for first-class animation scrubbing (replaces DIY `animation-delay: -{{t}}s`)
 
 ### Animated SVG
 
@@ -235,6 +242,7 @@ Load from the toolbar **Examples…** menu, or open the files directly. Short in
 - [`examples/p1-demo.md`](examples/p1-demo.md) — graph controls, self-edges, corner ports, shared env, plot tooltips
 - [`examples/p1-diagnostics-demo.md`](examples/p1-diagnostics-demo.md) — soft errors, degree hints, `ivm check` CLI
 - [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
+- [`examples/p3-p4-demo.md`](examples/p3-p4-demo.md) — bar/scatter/categorical, legend/annotate, zoom+dual axis, graph lanes/groups, `@scrub`, `@ns` typo warning
 - [`examples/p4-demo.md`](examples/p4-demo.md) — `@ns` sharing, picker sync, Copy fence / Reset env
 
 ## Project layout

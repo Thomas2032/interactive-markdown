@@ -1,7 +1,7 @@
 {
   "name": "interactive-markdown",
-  "version": "0.8.0",
-  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots, graphs, diagnostics + ivm check CLI, source autocomplete, @fn macros, arrays, angle mode, phases",
+  "version": "0.9.0",
+  "description": "Interactive Markdown (IVM): plain .md with live SVG, XY plots (bar/scatter/categorical, dual axis, zoom/pan, annotate), graph lanes/groups, @scrub, @ns typo warnings, diagnostics + ivm check CLI, source autocomplete",
   "main": "./src/index.js",
   "directories": {
     "example": "examples",

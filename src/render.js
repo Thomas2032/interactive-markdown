@@ -66,6 +66,13 @@ function serializeMetaLines(parsed) {
     if (!phase?.name) continue;
     lines.push(`@phase ${phase.name}: ${phase.min}..${phase.max}`);
   }
+  if (parsed?.scrub?.name && Number(parsed.scrub.duration) > 0) {
+    let line = `@scrub ${parsed.scrub.name} duration=${parsed.scrub.duration}`;
+    if (parsed.scrub.selector && parsed.scrub.selector !== ".im-scrub") {
+      line += ` selector=${parsed.scrub.selector}`;
+    }
+    lines.push(line);
+  }
   return lines;
 }
 
@@ -188,6 +195,44 @@ export function mountIvm(container, fenceBody, options = {}) {
 
   /** Skip DOM writes when the substituted source is unchanged so CSS and SMIL keep running. */
   let lastFilled = null;
+  /** Interactive zoom/pan window for @plot zoom */
+  let plotView = null;
+
+  /**
+   * Apply @scrub: pause CSS animations and set animation-delay from the bound control.
+   * @param {Record<string, unknown>} env
+   */
+  function applyScrub(env) {
+    const scrub = parsed.scrub;
+    if (!scrub?.name) return;
+    const t = Number(env[scrub.name]);
+    if (!Number.isFinite(t)) return;
+    const delay = `-${Math.max(0, t)}s`;
+    const root =
+      svgHost.shadowRoot?.querySelector?.("svg") || svgHost.querySelector?.("svg");
+    if (!root) return;
+    const sel = scrub.selector || ".im-scrub";
+    /** @type {Element[]} */
+    let nodes = [];
+    try {
+      nodes = [...root.querySelectorAll(sel)];
+    } catch (_) {
+      nodes = [];
+    }
+    if (!nodes.length && sel === ".im-scrub") {
+      // Fallback: elements that declare data-scrub
+      nodes = [...root.querySelectorAll("[data-scrub]")];
+    }
+    for (const el of nodes) {
+      const style = /** @type {HTMLElement|SVGElement} */ (el).style;
+      if (!style) continue;
+      style.animationPlayState = "paused";
+      style.animationDelay = delay;
+      if (scrub.duration > 0 && !style.animationDuration) {
+        style.animationDuration = `${scrub.duration}s`;
+      }
+    }
+  }
 
   /**
    * @param {string} markup
@@ -363,10 +408,15 @@ export function mountIvm(container, fenceBody, options = {}) {
         height: parsed.plot.height ?? undefined,
         grid: parsed.plot.grid,
         legend: parsed.plot.legend,
+        legendPos: parsed.plot.legendPos,
         lockAspect: parsed.plot.lockAspect,
+        zoom: parsed.plot.zoom,
         x: parsed.plot.x || undefined,
         y: parsed.plot.y || undefined,
+        y2: parsed.plot.y2 || undefined,
         series: parsed.plot.series || [],
+        annotations: parsed.plot.annotations || [],
+        view: plotView,
       });
       let overlayMarkup = null;
       if (parsed.templateSvg) {
@@ -379,9 +429,13 @@ export function mountIvm(container, fenceBody, options = {}) {
       }
       const filled = buildPlotSvg(model, env, { errors: softErrors, overlayMarkup, exprOptions: exprOpts });
       showRuntimeErrors(softErrors);
-      if (filled === lastFilled) return;
+      if (filled === lastFilled) {
+        applyScrub(env);
+        return;
+      }
       lastFilled = filled;
       paintSvg(sanitizeSvg(filled));
+      applyScrub(env);
       return;
     }
     if (!parsed.templateSvg) {
@@ -394,9 +448,13 @@ export function mountIvm(container, fenceBody, options = {}) {
     }
     const filled = substitute(wrapSvgTemplate(parsed.templateSvg), env, softErrors, exprOpts);
     showRuntimeErrors(softErrors);
-    if (filled === lastFilled) return;
+    if (filled === lastFilled) {
+      applyScrub(env);
+      return;
+    }
     lastFilled = filled;
     paintSvg(sanitizeSvg(filled));
+    applyScrub(env);
   }
 
   function setVar(name, value) {
@@ -602,6 +660,94 @@ export function mountIvm(container, fenceBody, options = {}) {
       svgHost.removeEventListener("pointerleave", onLeave);
       hideTooltip();
     });
+
+    if (parsed.plot.zoom) {
+      /** @type {{ x: number, y: number, view: object } | null} */
+      let drag = null;
+      const onWheel = (ev) => {
+        ev.preventDefault();
+        const model = normalizePlot({
+          ...parsed.plot,
+          view: plotView,
+        });
+        const factor = ev.deltaY < 0 ? 0.9 : 1.1;
+        const xMid = (model.x.min + model.x.max) / 2;
+        const yMid = (model.y.min + model.y.max) / 2;
+        const xSpan = ((model.x.max - model.x.min) * factor) / 2;
+        const ySpan = ((model.y.max - model.y.min) * factor) / 2;
+        plotView = {
+          ...(plotView || {}),
+          xMin: xMid - xSpan,
+          xMax: xMid + xSpan,
+          yMin: yMid - ySpan,
+          yMax: yMid + ySpan,
+        };
+        if (model.y2) {
+          const y2Mid = (model.y2.min + model.y2.max) / 2;
+          const y2Span = ((model.y2.max - model.y2.min) * factor) / 2;
+          plotView.y2Min = y2Mid - y2Span;
+          plotView.y2Max = y2Mid + y2Span;
+        }
+        lastFilled = null;
+        rebind();
+      };
+      const onDown = (ev) => {
+        if (ev.button != null && ev.button !== 0) return;
+        const model = normalizePlot({ ...parsed.plot, view: plotView });
+        drag = { x: ev.clientX, y: ev.clientY, view: { ...(plotView || {}), xMin: model.x.min, xMax: model.x.max, yMin: model.y.min, yMax: model.y.max, y2Min: model.y2?.min, y2Max: model.y2?.max } };
+        svgHost.setPointerCapture?.(ev.pointerId);
+      };
+      const onDrag = (ev) => {
+        if (!drag) return;
+        const dx = ev.clientX - drag.x;
+        const dy = ev.clientY - drag.y;
+        const model = normalizePlot(parsed.plot);
+        const layoutW = Math.max(10, model.width - 64 - 28);
+        const layoutH = Math.max(10, model.height - 24 - 48);
+        const xSpan = drag.view.xMax - drag.view.xMin;
+        const ySpan = drag.view.yMax - drag.view.yMin;
+        const xShift = (-dx / layoutW) * xSpan;
+        const yShift = (dy / layoutH) * ySpan;
+        plotView = {
+          xMin: drag.view.xMin + xShift,
+          xMax: drag.view.xMax + xShift,
+          yMin: drag.view.yMin + yShift,
+          yMax: drag.view.yMax + yShift,
+        };
+        if (drag.view.y2Min != null && drag.view.y2Max != null) {
+          const y2Span = drag.view.y2Max - drag.view.y2Min;
+          const y2Shift = (dy / layoutH) * y2Span;
+          plotView.y2Min = drag.view.y2Min + y2Shift;
+          plotView.y2Max = drag.view.y2Max + y2Shift;
+        }
+        lastFilled = null;
+        rebind();
+      };
+      const onUp = () => {
+        drag = null;
+      };
+      const onDbl = () => {
+        plotView = null;
+        lastFilled = null;
+        rebind();
+      };
+      svgHost.addEventListener("wheel", onWheel, { passive: false });
+      svgHost.addEventListener("pointerdown", onDown);
+      svgHost.addEventListener("pointermove", onDrag);
+      svgHost.addEventListener("pointerup", onUp);
+      svgHost.addEventListener("pointercancel", onUp);
+      svgHost.addEventListener("dblclick", onDbl);
+      svgHost.style.touchAction = "none";
+      svgHost.title = (svgHost.title ? svgHost.title + " · " : "") + "Scroll to zoom, drag to pan, double-click to reset";
+      cleanups.push(() => {
+        svgHost.removeEventListener("wheel", onWheel);
+        svgHost.removeEventListener("pointerdown", onDown);
+        svgHost.removeEventListener("pointermove", onDrag);
+        svgHost.removeEventListener("pointerup", onUp);
+        svgHost.removeEventListener("pointercancel", onUp);
+        svgHost.removeEventListener("dblclick", onDbl);
+      });
+    }
   }
 
   rebind();

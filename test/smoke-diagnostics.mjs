@@ -103,5 +103,34 @@ assert("cli clean exit 0", ok.status === 0, ok.stderr + ok.stdout);
 const okPayload = JSON.parse(ok.stdout);
 assert("cli clean no errors", okPayload.errorCount === 0);
 
+const nsMd = [
+  "```ivm",
+  "@ns demo",
+  "@svg 10x10",
+  '<rect width="10" height="10"/>',
+  "```",
+  "",
+  "```ivm",
+  "@ns demmo",
+  "@svg 10x10",
+  '<rect width="10" height="10"/>',
+  "```",
+].join("\n");
+const nsDoc = diagnoseMarkdown(nsMd);
+assert(
+  "ns typo warning",
+  nsDoc.diagnostics.some((d) => d.code === "ns-typo"),
+  JSON.stringify(nsDoc.diagnostics.filter((d) => String(d.code).startsWith("ns")))
+);
+
+const scrubFence = diagnoseFence(`@timer t: 0..4 = 0
+@scrub t duration=4
+@svg 100x40
+<svg/>
+`);
+assert("scrub parses clean", scrubFence.errorCount === 0, JSON.stringify(scrubFence.diagnostics));
+assert("scrub on parsed", scrubFence.parsed?.scrub?.name === "t" && scrubFence.parsed.scrub.duration === 4);
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -417,11 +417,15 @@ function copyPlotModel(plot) {
     height: model.height,
     grid: model.grid,
     legend: model.legend,
+    legendPos: model.legendPos,
     lockAspect: model.lockAspect,
+    zoom: model.zoom,
     samples: model.samples,
-    x: { ...model.x },
+    x: { ...model.x, cats: model.x.cats ? [...model.x.cats] : undefined },
     y: { ...model.y },
+    y2: model.y2 ? { ...model.y2 } : null,
     series: model.series.map((s) => ({ ...s })),
+    annotations: (model.annotations || []).map((a) => ({ ...a })),
   };
 }
 
@@ -731,6 +735,13 @@ function serializeExprMeta(block) {
     if (!phase?.name) continue;
     lines.push(`@phase ${phase.name}: ${phase.min}..${phase.max}`);
   }
+  if (block?.scrub?.name && Number(block.scrub.duration) > 0) {
+    let line = `@scrub ${block.scrub.name} duration=${block.scrub.duration}`;
+    if (block.scrub.selector && block.scrub.selector !== ".im-scrub") {
+      line += ` selector=${block.scrub.selector}`;
+    }
+    lines.push(line);
+  }
   return lines;
 }
 
@@ -746,6 +757,13 @@ function copyExprMeta(parsed) {
     phases: Array.isArray(parsed?.phases)
       ? parsed.phases.map((p) => ({ name: p.name, min: p.min, max: p.max }))
       : [],
+    scrub: parsed?.scrub?.name
+      ? {
+          name: parsed.scrub.name,
+          duration: Number(parsed.scrub.duration) || 0,
+          selector: parsed.scrub.selector || ".im-scrub",
+        }
+      : null,
   };
 }
 
@@ -781,6 +799,8 @@ function copyGraphModel(model) {
   const next = {
     nodes: (model?.nodes || []).map((n) => ({ ...n })),
     edges: (model?.edges || []).map((e) => ({ ...e })),
+    lanes: (model?.lanes || []).map((l) => ({ ...l })),
+    groups: (model?.groups || []).map((g) => ({ ...g })),
   };
   if (model?.animated) next.animated = true;
   if (model?.motion) next.motion = { ...model.motion };
@@ -822,6 +842,13 @@ function cloneExprMeta(block) {
     phases: Array.isArray(block?.phases)
       ? block.phases.map((p) => ({ name: p.name, min: p.min, max: p.max }))
       : [],
+    scrub: block?.scrub?.name
+      ? {
+          name: block.scrub.name,
+          duration: Number(block.scrub.duration) || 0,
+          selector: block.scrub.selector || ".im-scrub",
+        }
+      : null,
   };
 }
 
