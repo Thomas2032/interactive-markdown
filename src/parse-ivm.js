@@ -315,9 +315,18 @@ function unquote(s) {
 
 /** @returns {[string, string|undefined]} */
 function takeLabel(rest) {
-  const m = rest.match(/\s+"([^"]*)"\s*$/) || rest.match(/\s+'([^']*)'\s*$/);
-  if (!m) return [rest.trim(), undefined];
-  return [rest.slice(0, m.index).trim(), m[1]];
+  // Prefer a trailing quoted label (historical @slider … "Label").
+  const end = rest.match(/\s+"([^"]*)"\s*$/) || rest.match(/\s+'([^']*)'\s*$/);
+  if (end) return [rest.slice(0, end.index).trim(), end[1]];
+  // Also allow mid-line quotes so attrs can follow, e.g.
+  // @annotate x=1 y=55 "best month" dy=-14
+  const mid = rest.match(/(?:^|\s)(?:"([^"]*)"|'([^']*)')(?=\s|$)/);
+  if (!mid || mid.index === undefined) return [rest.trim(), undefined];
+  const label = mid[1] !== undefined ? mid[1] : mid[2];
+  const start = mid.index + (mid[0].startsWith(" ") || mid[0].startsWith("\t") ? 1 : 0);
+  const before = rest.slice(0, start);
+  const after = rest.slice(start + (mid[0].trimStart().length));
+  return [(before + " " + after).replace(/\s+/g, " ").trim(), label];
 }
 
 /** @param {string} rest */
