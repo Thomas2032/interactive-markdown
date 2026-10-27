@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseHTML, DOMParser } from "linkedom";
-import { marked } from "marked";
 import { insertFeature, parseDocument, serializeDocument, updateBlock } from "../src/document.js";
-import { mountDocumentEditor } from "../src/document-editor.js";
 
 const { window, document } = parseHTML(
   "<!doctype html><html><body><div id='host'></div></body></html>"
@@ -10,9 +8,6 @@ const { window, document } = parseHTML(
 globalThis.document = document;
 globalThis.DOMParser = DOMParser;
 globalThis.window = window;
-globalThis.performance = { now: () => Date.now() };
-globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
-globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 
 let passed = 0;
 let failed = 0;
@@ -114,72 +109,6 @@ assert(
 );
 assert("formula writes @let", /@let a =/.test(serializeDocument(motion.blocks)));
 
-const host = document.getElementById("host");
-let seen = null;
-const editor = mountDocumentEditor(host, "", {
-  onChange(markdown) {
-    seen = markdown;
-  },
-});
-assert("mount does not write", seen === null);
-const button = host.querySelector("[data-add=slider]");
-button.dispatchEvent(new window.Event("click", { bubbles: true }));
-assert("add slider writes @slider", typeof seen === "string" && /@slider\s+s1:/.test(seen), seen);
-const label = host.querySelector('.im-doc-inspector [data-field="label"]');
-label.value = "Amplitude";
-label.dispatchEvent(new window.Event("input", { bubbles: true }));
-assert("label edit keeps the field", label.isConnected && label.value === "Amplitude");
-assert("label edit writes the source", /@slider s1:.* "Amplitude"/.test(seen), seen);
-editor.destroy();
-
-const graphHost = document.createElement("div");
-document.body.appendChild(graphHost);
-let graphSeen = null;
-mountDocumentEditor(graphHost, read("graph.md"), {
-  onChange(markdown) {
-    graphSeen = markdown;
-  },
-});
-const addNode = graphHost.querySelector('.im-graph-bar [data-action="add"]');
-addNode.dispatchEvent(new window.Event("click", { bubbles: true }));
-assert("graph add writes a node", typeof graphSeen === "string" && /@node n1:/.test(graphSeen), graphSeen);
-assert("graph.md stays still", graphSeen && !/@animate/.test(graphSeen));
-assert("graph add leaves the canvas mounted", !!graphHost.querySelector(".im-graph-canvas"));
-
-const proseHost = document.createElement("div");
-document.body.appendChild(proseHost);
-mountDocumentEditor(proseHost, read("amplitude.md"), { marked });
-const prose = proseHost.querySelectorAll(".im-doc-prose");
-assert("prose regions", prose.length === 2);
-assert("heading renders as html", prose[0]?.querySelector("h1")?.textContent === "Wave amplitude");
-assert("later prose renders as html", prose[1]?.querySelector("h2")?.textContent === "Tips");
-assert("prose is not wrapped in a block", ![...prose].some((el) => el.closest(".im-doc-block")));
-assert("one interactive block", proseHost.querySelectorAll(".im-doc-block").length === 1);
-
-const dragHost = document.createElement("div");
-document.body.appendChild(dragHost);
-let dragSeen = "";
-mountDocumentEditor(dragHost, "# Wave amplitude\n\nHello\n", {
-  onChange(markdown) {
-    dragSeen = markdown;
-  },
-});
-const headingBtn = dragHost.querySelector("[data-add=heading]");
-const point = (type, x, y) => {
-  const event = new window.Event(type, { bubbles: true });
-  event.clientX = x;
-  event.clientY = y;
-  event.button = 0;
-  event.pointerId = 1;
-  return event;
-};
-headingBtn.dispatchEvent(point("pointerdown", 10, 10));
-document.dispatchEvent(point("pointermove", 12, 48));
-document.dispatchEvent(point("pointerup", 12, 48));
-headingBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
-assert("drag snap inserts one heading", dragSeen.startsWith("## Heading\n"), dragSeen);
-assert("drag does not also click-add", dragSeen.split("## Heading").length === 2, dragSeen);
-
 let merged = insertFeature({ blocks: [] }, "graph");
 merged = {
   doc: {
@@ -201,7 +130,7 @@ assert("animated round trip stays a graph", mergedAgain.blocks.every((b) => b.ty
 assert("animated flag stays", mergedAgain.blocks[0].model.animated === true);
 assert("animated nodes stay", mergedAgain.blocks[0].model.nodes.length === 1 && mergedAgain.blocks[0].model.nodes[0].id === "a");
 
-// --- P4 editor polish ---
+// --- P4 document model ---
 const p4 = parseDocument(read("p4-demo.md"));
 assert("p4 has graph", p4.blocks.some((b) => b.type === "graph"));
 assert(
@@ -217,66 +146,6 @@ assert(
   "p4 animate binds",
   p4Graph?.model?.motion?.quantityFrom === "dots" && p4Graph?.model?.motion?.speedFrom === "pace"
 );
-
-const p4Host = document.getElementById("host");
-p4Host.innerHTML = "";
-const statuses = [];
-const envStore = new Map();
-const namespaces = new Map();
-const p4Mount = mountDocumentEditor(p4Host, read("p4-demo.md"), {
-  envStore,
-  namespaces,
-  onStatus(msg) {
-    statuses.push(msg);
-  },
-});
-assert("doc editor mounts", !!p4Host.querySelector(".im-doc"));
-
-function findGraphBlock() {
-  return [...p4Host.querySelectorAll(".im-doc-block")].find((el) =>
-    el.querySelector(".im-doc-kind")?.textContent?.toLowerCase().includes("graph")
-  );
-}
-
-const graphSection = findGraphBlock();
-assert("graph block present", !!graphSection);
-assert("copy fence button", !!graphSection.querySelector('[data-action="copy-fence"]'));
-assert("reset env button", !!graphSection.querySelector('[data-action="reset-env"]'));
-
-// select graph to open inspector (paint rebuilds DOM — re-query afterward)
-graphSection.querySelector('[data-action="select"]')?.click();
-const graphSelected = findGraphBlock();
-assert("graph selected", !!graphSelected && graphSelected.classList.contains("is-selected"));
-const nsLabel = [...p4Host.querySelectorAll(".im-doc-field span")].find((s) =>
-  /Namespace \(@ns\)/.test(s.textContent || "")
-);
-assert("namespace label", !!nsLabel);
-assert("namespace help", !!p4Host.querySelector(".im-doc-ns .im-doc-help"));
-
-// seed env then reset — remount restores fence defaults into the store
-envStore.set("ivm:0", { scale: 1.8 });
-envStore.set("ivm:1", { dots: 5, pace: 4 });
-namespaces.set("demo", { scale: 1.8, dots: 5, pace: 4 });
-graphSelected.querySelector('[data-action="reset-env"]')?.click();
-assert("reset status", statuses.some((s) => /Env reset/.test(s)), statuses.join(" | "));
-const nsAfter = namespaces.get("demo") || {};
-assert(
-  "reset restores ns defaults",
-  Number(nsAfter.dots) === 2 && Number(nsAfter.pace) === 2.4,
-  JSON.stringify(nsAfter)
-);
-const graphEnv = envStore.get("ivm:1") || {};
-assert(
-  "reset restores graph env defaults",
-  Number(graphEnv.dots) === 2 && Number(graphEnv.pace) === 2.4,
-  JSON.stringify(graphEnv)
-);
-
-findGraphBlock()?.querySelector('[data-action="copy-fence"]')?.click();
-assert("copy status", statuses.some((s) => /Copied IVM fence/.test(s)), statuses.join(" | "));
-
-p4Mount.destroy();
-
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

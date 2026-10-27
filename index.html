@@ -39,12 +39,8 @@
 
     <main class="layout">
       <section class="pane" aria-label="Editor">
-        <div class="pane-tabs" role="tablist" aria-label="Editor view">
-          <button type="button" id="tab-source" role="tab" aria-selected="true" aria-controls="editor">Source</button>
-          <button type="button" id="tab-graph" role="tab" aria-selected="false" aria-controls="graph-editor">Graph editor</button>
-        </div>
+        <div class="pane-title">Source</div>
         <textarea id="editor" spellcheck="false" aria-label="Markdown source"></textarea>
-        <div id="graph-editor" hidden></div>
       </section>
       <section class="pane" aria-label="Preview">
         <div class="pane-title">Preview</div>

@@ -1,15 +1,14 @@
 # Interactive Markdown (IVM)
 
-**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language, plus **Cartesian XY plots** and a **graph editor** stored in the same fence.
+**Interactive Markdown** is a small browser **editor + renderer** for plain `.md` files that include live **vector graphics** driven by sliders, timers, and a safe expression language, plus **Cartesian XY plots** and **directed graph previews** stored in the same fence.
 
-Write Markdown as usual. Add an `ivm` fenced block when you want interactive SVG or a directed graph you can edit in the preview. The format stays AI-friendly: readable text an agent can generate like normal Markdown.
+Write Markdown as usual. Add an `ivm` fenced block when you want interactive SVG, an XY plot, or a directed graph preview. The format stays AI-friendly: readable text an agent can generate like normal Markdown.
 
 License: **MIT** (see [LICENSE](LICENSE)).
 
 ## Features
 
-- Split **editor** and **live preview**
-- **Graph editor** tab beside the source: prose renders as formatted text, and sliders, figures, and graphs stay editable blocks
+- Split **source editor** and **live preview**
 - Open / save `.md`, with a **localStorage** draft
 - IVM widgets: `@slider`, `@timer` (Play/Pause), `@input`, `@toggle`
 - Derived values with `@let` (agents should emit `@let`, not `@calc`)
@@ -19,11 +18,11 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
 - **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **bar / scatter / categorical**, **dual y2 axes**, **zoom/pan**, **log/symlog**, **legends** (position), **`@annotate`**, **parametric/polar**, optional **SVG overlay**, and **hover tooltips**
-- Visual **graph editor**: `@graph` (**`layout=dagre`** auto-layout), `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**, **`@lane` / `@group`**; edits write back into the fence)
+- **Graph preview**: `@graph` (**`layout=dagre`** auto-layout), `@node`, and `@edge` (**self-edges**, **corner ports**, **`@lane` / `@group`**; edit the fence source, preview is read-only)
 - **`@data` tables** → plot series (`from=table` qualifies column ids); **`remap` / `px` / `py`** + **`@anchor`** for safer SVG coordinates
 - **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
-- **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
-- **Editor polish**: Examples picker stays on the loaded file; Graph editor blocks offer **Copy fence** / **Reset env**; inspector labels **Namespace (@ns)** with short help
+- **Shared control env** via `@ns` (same namespace keeps slider/timer values across fences)
+- **Editor polish**: Examples picker stays on the loaded file after load
 - Animated SVG: CSS `@keyframes`, SMIL, glow filters, and internal `<use>`
 - Whitelist expression evaluator (no `eval`)
 - **Diagnostics** with line numbers and hints (unknown directives/functions, degree footguns, **`@ns` typo / case warnings** across fences)
@@ -52,9 +51,9 @@ npx serve .
 
 > ES modules need HTTP — opening `index.html` as a `file://` URL will not work.
 
-## Graph editor tab
+## Source + preview
 
-The left pane has two tabs. **Source** is the markdown. **Graph editor** shows the same document with prose rendered as formatted text. Sliders, timers, text fields, toggles, formulas, shapes, XY plots, and graphs stay as blocks. Select a block to edit its label, range, expression, or shape attributes — including **Namespace (@ns)** (fences with the same name share control values). A shape attribute can be a number or `{{name}}`. Figure / plot / graph blocks also expose **Copy fence** (clipboard) and **Reset env** (snap controls back to fence defaults, including shared `@ns` state). The graph block is the canvas: drag, connect, and rename there. An animated graph marches dashes along each edge and sends a dot along the same path; when quantity/speed are bound to slider names, the motion toolbar shows those names. Each change rewrites the source. The right pane is the rendered preview.
+The left pane is the Markdown **Source**. The right pane is the live **Preview**. Edit `@graph` / `@node` / `@edge` in the source; the preview renders a read-only diagram (including `@animate` traveling dots bound to slider names). Use `@ns` so fences share control values.
 
 The toolbar **Examples…** menu keeps the selected file name after load (it no longer snaps back to the placeholder).
 
@@ -116,7 +115,7 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@data name` + CSV rows | Table → env `name_col` arrays for series / expressions |
 | `@anchor name x=N y=N` | Named point → `name_x` / `name_y` in expressions |
 | `@grid on\|off` | Plot grid toggle |
-| `@graph [layout=dagre\|flow\|layered]` | Start an editable directed graph; `layout=` auto-places nodes missing both `x=` and `y=` |
+| `@graph [layout=dagre\|flow\|layered]` | Start a directed graph (read-only preview); `layout=` auto-places nodes missing both `x=` and `y=` |
 | `@lane id: "Label" y=N [height=H] [fill=#hex]` | Horizontal swimlane behind nodes |
 | `@group id: "Label"` | Named group; nodes with `group=id` get a bounding box |
 | `@node id: "Label" [x=N] [y=N] kind=K [lane=id] [group=id]` | Node. Omit both `x=`/`y=` when `layout=` is set. `kind` is `action` (default), `input`, `output`, or `decision` |
@@ -145,9 +144,9 @@ Humans and docs should use the long forms. Generators may emit short aliases; bo
 
 ### Graph
 
-A `@graph` fence is a node-and-edge diagram. Drag a node, drag a port (cardinal or corner) onto another node — including the same node for a self-edge — double-click a label to rename, and press Delete to remove the selection. `@slider` / `@timer` / `@let` may share the fence; bind `@animate quantity=name` and `speed=name` to those controls. Path, direction, and literal quantity/speed still edit on the canvas. Do not mix `@svg` or `@plot` into a graph fence.
+A `@graph` fence is a node-and-edge diagram rendered as a **read-only** preview. Declare nodes and edges (including self-edges and corner ports) in the source. `@slider` / `@timer` / `@let` may share the fence; bind `@animate quantity=name` and `speed=name` to those controls so traveling dots update live. Do not mix `@svg` or `@plot` into a graph fence.
 
-**Auto-layout:** `@graph layout=dagre` (aliases `flow`, `layered`) places nodes that omit **both** `x=` and `y=`. Nodes with either coordinate stay where you put them. Dragging a node in the editor clears `autoPos` so the position becomes explicit.
+**Auto-layout:** `@graph layout=dagre` (aliases `flow`, `layered`) places nodes that omit **both** `x=` and `y=`. Nodes with either coordinate stay where you put them.
 
 ````markdown
 ```ivm
@@ -263,7 +262,7 @@ Load from the toolbar **Examples…** menu, or open the files directly. Short in
 - [`examples/p1-diagnostics-demo.md`](examples/p1-diagnostics-demo.md) — soft errors, degree hints, `ivm check` CLI
 - [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
 - [`examples/p3-p4-demo.md`](examples/p3-p4-demo.md) — bar/scatter/categorical, legend/annotate, zoom+dual axis, graph lanes/groups, `@scrub`, `@ns` typo warning
-- [`examples/p4-demo.md`](examples/p4-demo.md) — `@ns` sharing, picker sync, Copy fence / Reset env
+- [`examples/p4-demo.md`](examples/p4-demo.md) — `@ns` sharing, picker sync
 
 ## Project layout
 
@@ -273,13 +272,12 @@ src/
   index.js          Library entry
   app.js            UI wiring
   document.js       Block model (parse and serialize)
-  document-editor.js  Preview block editor
   markdown.js       MD + IVM pipeline
   parse-ivm.js      Fence / control parser
   expr.js           Safe expression evaluator
   sanitize-svg.js   SVG sanitizer
   render.js         Controls + SVG binding
-  graph-editor.js   Graph model and canvas editor
+  graph-editor.js     Graph preview (read-only) + serialize helpers
   plot.js           Cartesian XY plot SVG builder
   diagnostics.js    Structured fence diagnostics
   autocomplete.js   Source-tab completions
@@ -296,7 +294,7 @@ test/               Node smoke tests
 npm test
 ```
 
-Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph editor, XY plots, preview document builder, diagnostics/CLI, and autocomplete (`linkedom` is used where a DOM is required).
+Smoke tests cover the expression engine, IVM parser, SVG sanitizer, renderer, Markdown pipeline, graph preview, XY plots, document model, diagnostics/CLI, and autocomplete (`linkedom` is used where a DOM is required).
 
 ## License
 

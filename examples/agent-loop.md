@@ -23,4 +23,4 @@ One pass through an agent: a trigger starts the loop, then think, act, and obser
 @edge act -> tools from=bottom to=top
 ```
 
-Drag any side dot to reconnect a node. On the canvas, change the path, quantity, direction, or seconds and the source updates.
+Edit `@node` / `@edge` / `@animate` in the source — the preview renders the flow and traveling dots.
