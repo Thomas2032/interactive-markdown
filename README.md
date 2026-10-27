@@ -53,6 +53,22 @@ The left pane has two tabs. **Source** is the markdown. **Graph editor** shows t
 
 The toolbar **Examples…** menu keeps the selected file name after load (it no longer snaps back to the placeholder).
 
+## Choosing plot vs SVG vs graph
+
+Pick the fence mode from the ask, then stay inside its mixing rules.
+
+| User ask | Use | Avoid |
+|----------|-----|--------|
+| Curve / density / log axes / parametric or polar | `@plot` (optional trailing `@svg` overlay) | Hand-drawing axes in raw SVG |
+| Custom drawing, glyphs, or chrome on a chart | `@svg`, or `@plot` then `@svg` | Invented tags (`@chart`, Mustache, raw JS) |
+| Flow, agent loop, boxes and arrows | `@graph` as the first directive | Mixing `@plot` / `@svg` into that fence |
+| Shared sliders across two figures | Same `@ns name` on both fences | Mismatched namespace spellings |
+| Degrees in `sin` / `cos` | `@angle deg`, or always-safe `sind` / `cosd` | Assuming `sin(45)` is degrees without `@angle deg` |
+
+**Mixing rules:** `@plot` may end with a trailing `@svg` overlay (plot viewBox `0 0 W H`). `@graph` is exclusive of `@plot` and `@svg` — put a flowchart beside a plot in two fences and share state with `@ns`. Controls (`@slider`, `@timer`, `@let`, …) work in every mode.
+
+For copy-paste recipes, see [docs/golden-snippets.md](docs/golden-snippets.md).
+
 ## IVM dialect (quick reference)
 
 Fence name: **`ivm`**. Long control names are canonical; short aliases are accepted for compact AI generation.
@@ -205,7 +221,7 @@ In a normal Markdown viewer, an `ivm` fence shows up as a plain code block — s
 
 ## Examples
 
-Load from the toolbar **Examples…** menu, or open the files directly:
+Load from the toolbar **Examples…** menu, or open the files directly. Short intent → fence recipes: [docs/golden-snippets.md](docs/golden-snippets.md).
 
 - [`examples/amplitude.md`](examples/amplitude.md) — wave amplitude + phase timer
 - [`examples/circular-motion.md`](examples/circular-motion.md) — point on a circle with spin animation
