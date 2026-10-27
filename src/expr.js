@@ -2,8 +2,8 @@
  * Safe expression evaluator for Interactive Markdown.
  * Whitelist-only recursive-descent parser. NEVER uses eval or Function.
  *
- * Supports arrays, map/reduce helpers, user @fn macros (via options.functions),
- * fence angleMode (deg|rad) for sin/cos/tan family, and @phase helpers.
+ * Supports arrays, map/reduce helpers, remap/px/py coordinate helpers, user @fn macros
+ * (via options.functions), fence angleMode (deg|rad) for sin/cos/tan family, and @phase helpers.
  */
 
 const CONSTANTS = Object.freeze({
@@ -68,6 +68,38 @@ function buildFunctions(angleMode, phases) {
     clamp: (x, lo, hi) => Math.min(Math.max(x, lo), hi),
     mod: (a, b) => ((a % b) + b) % b,
     lerp: (a, b, t) => a + (b - a) * t,
+    // Linear remap: value from [in0,in1] → [out0,out1] (safe SVG / plot pixel helper).
+    // Named remap (not map) because map() is the array mapper.
+    remap: (v, in0, in1, out0, out1) => {
+      const x = Number(v);
+      const a = Number(in0);
+      const b = Number(in1);
+      const c = Number(out0);
+      const d = Number(out1);
+      if (![x, a, b, c, d].every(Number.isFinite)) return NaN;
+      if (b === a) return c;
+      return c + ((x - a) * (d - c)) / (b - a);
+    },
+    // Shorthand: data → pixel X (left→right)
+    px: (v, lo, hi, size) => {
+      const x = Number(v);
+      const a = Number(lo);
+      const b = Number(hi);
+      const w = Number(size);
+      if (![x, a, b, w].every(Number.isFinite)) return NaN;
+      if (b === a) return 0;
+      return ((x - a) / (b - a)) * w;
+    },
+    // Shorthand: data → pixel Y with SVG y-down flip (top of range → y=0)
+    py: (v, lo, hi, size) => {
+      const x = Number(v);
+      const a = Number(lo);
+      const b = Number(hi);
+      const h = Number(size);
+      if (![x, a, b, h].every(Number.isFinite)) return NaN;
+      if (b === a) return h;
+      return h - ((x - a) / (b - a)) * h;
+    },
     deg: (r) => (r * 180) / Math.PI,
     rad: (d) => (d * Math.PI) / 180,
     // Always degrees, regardless of angleMode

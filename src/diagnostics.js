@@ -35,6 +35,8 @@ const DIRECTIVES = [
   "legend",
   "annotate",
   "scrub",
+  "data",
+  "anchor",
   "graph",
   "lane",
   "group",
@@ -163,6 +165,19 @@ export function checkExpressions(parsed) {
     }
   }
 
+  for (const table of parsed.data || []) {
+    for (const col of table.columnNames || Object.keys(table.columns || {})) {
+      env[`${table.name}_${col}`] = (table.columns && table.columns[col]) ? [...table.columns[col]] : [];
+    }
+    const firstCol = (table.columnNames && table.columnNames[0]) || Object.keys(table.columns || {})[0];
+    const rowCount = firstCol && table.columns?.[firstCol] ? table.columns[firstCol].length : 0;
+    env[`${table.name}_len`] = rowCount;
+  }
+  for (const a of parsed.anchors || []) {
+    env[`${a.name}_x`] = a.x;
+    env[`${a.name}_y`] = a.y;
+  }
+
   /** @type {Record<string, { params: string[], expression: string }>} */
   const functions = Object.create(null);
   for (const fn of parsed.fns || []) {
@@ -219,6 +234,11 @@ export function checkExpressions(parsed) {
       if (series.xExpression) exprs.push(["x", series.xExpression]);
       if (series.yExpression) exprs.push(["y", series.yExpression]);
       if (series.rExpression) exprs.push(["r", series.rExpression]);
+      // cats= bare names / arrays are evaluated when looking like expressions
+      if (series.catsExpression && /^[A-Za-z_]/.test(series.catsExpression.trim())) {
+        const c = series.catsExpression.trim();
+        if (!/,/.test(c)) exprs.push(["cats", c]);
+      }
       for (const [which, source] of exprs) {
         try {
           evaluate(source, env, exprOpts);

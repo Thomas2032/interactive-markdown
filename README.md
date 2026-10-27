@@ -19,7 +19,8 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
 - **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **bar / scatter / categorical**, **dual y2 axes**, **zoom/pan**, **log/symlog**, **legends** (position), **`@annotate`**, **parametric/polar**, optional **SVG overlay**, and **hover tooltips**
-- Visual **graph editor**: `@graph`, `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**, **`@lane` / `@group`**; edits write back into the fence)
+- Visual **graph editor**: `@graph` (**`layout=dagre`** auto-layout), `@node`, and `@edge` (drag, connect, rename, **self-edges**, **corner ports**, **`@lane` / `@group`**; edits write back into the fence)
+- **`@data` tables** → plot series (`from=table` qualifies column ids); **`remap` / `px` / `py`** + **`@anchor`** for safer SVG coordinates
 - **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
 - **Shared control env** between Preview and Graph editor (same fence keeps slider/timer values)
 - **Editor polish**: Examples picker stays on the loaded file; Graph editor blocks offer **Copy fence** / **Reset env**; inspector labels **Namespace (@ns)** with short help
@@ -112,11 +113,13 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@legend pos=top-right\|top-left\|bottom-right\|bottom-left` | Legend placement |
 | `@annotate x=N y=N "text" [dx=] [dy=] [axis=y\|y2]` | Callout without hand-written SVG |
 | `@scrub name duration=N [selector=.im-scrub]` | Pause CSS animations and bind `animation-delay` to a control |
+| `@data name` + CSV rows | Table → env `name_col` arrays for series / expressions |
+| `@anchor name x=N y=N` | Named point → `name_x` / `name_y` in expressions |
 | `@grid on\|off` | Plot grid toggle |
-| `@graph` | Start an editable directed graph |
+| `@graph [layout=dagre\|flow\|layered]` | Start an editable directed graph; `layout=` auto-places nodes missing both `x=` and `y=` |
 | `@lane id: "Label" y=N [height=H] [fill=#hex]` | Horizontal swimlane behind nodes |
 | `@group id: "Label"` | Named group; nodes with `group=id` get a bounding box |
-| `@node id: "Label" x=N y=N kind=K [lane=id] [group=id]` | Node. `kind` is `action` (default), `input`, `output`, or `decision` |
+| `@node id: "Label" [x=N] [y=N] kind=K [lane=id] [group=id]` | Node. Omit both `x=`/`y=` when `layout=` is set. `kind` is `action` (default), `input`, `output`, or `decision` |
 | `@edge from -> to` | Directed edge (self-edges allowed). Sides: `top\|right\|bottom\|left\|top-left\|top-right\|bottom-left\|bottom-right` (aliases `tl\|tr\|bl\|br`). Defaults `from=right`, `to=left` |
 | `@animate` | Marching dashes / traveling dots. Options: `path=ortho\|straight\|curve`, `quantity=N\|name`, `direction=forward\|reverse`, `speed=seconds\|name` |
 
@@ -143,6 +146,19 @@ Humans and docs should use the long forms. Generators may emit short aliases; bo
 ### Graph
 
 A `@graph` fence is a node-and-edge diagram. Drag a node, drag a port (cardinal or corner) onto another node — including the same node for a self-edge — double-click a label to rename, and press Delete to remove the selection. `@slider` / `@timer` / `@let` may share the fence; bind `@animate quantity=name` and `speed=name` to those controls. Path, direction, and literal quantity/speed still edit on the canvas. Do not mix `@svg` or `@plot` into a graph fence.
+
+**Auto-layout:** `@graph layout=dagre` (aliases `flow`, `layered`) places nodes that omit **both** `x=` and `y=`. Nodes with either coordinate stay where you put them. Dragging a node in the editor clears `autoPos` so the position becomes explicit.
+
+````markdown
+```ivm
+@graph layout=dagre
+@node start: "Start" kind=input
+@node step: "Step"
+@node done: "Done" kind=output
+@edge start -> step
+@edge step -> done
+```
+````
 
 ````markdown
 ```ivm
@@ -187,7 +203,8 @@ Series `id` or `label="…"` feeds the legend (default on; `nolegend` to hide). 
 |------|---------|
 | `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom]` | Start an XY plot (default 480×320; `zoom` enables wheel zoom / drag pan) |
 | `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Axis range, scale, tick step, and title |
-| `@series [id] [kind=…] [axis=y\|y2] [marker=…] [stroke=#…] [fill=#…] …` | Series style; body is `y=`, `kind=bar`+`cats=`+`y=`, `kind=scatter`+`x=`/`y=`, parametric, or polar |
+| `@series [id] [kind=…] [from=dataName] [axis=y\|y2] [marker=…] …` | Series style; `from=` qualifies bare `cats=`/`x=`/`y=` column ids as `dataName_col` |
+| `@data name` + header/rows | CSV/table available as `name_col` arrays (and via `from=`) |
 | `@grid on\|off` | Toggle the background grid |
 | `@svg` (after `@plot`) | Overlay markup in the plot viewBox (`0 0 W H`) with `{{expr}}` |
 
@@ -199,11 +216,13 @@ Placeholders use **double braces** only: `{{expr}}`.
 
 Allowed operators include `+ - * / % ^ **`, comparisons, `&& || !`, and ternary `? :`.
 
-Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sind`, `cosd`, `tand`, `asind`, `acosd`, `atand`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `deg`, `rad`, plus array helpers `len`, `nth`, `first`, `last`, `sum`, `mean`, `join`, `range`, `map`, `reduce`, `points`, and phase helpers `inPhase`, `phaseT`, `phaseAt`.
+Functions include: `abs`, `sqrt`, `pow`, `exp`, `ln`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sind`, `cosd`, `tand`, `asind`, `acosd`, `atand`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `clamp`, `mod`, `lerp`, `remap`, `px`, `py`, `deg`, `rad`, plus array helpers `len`, `nth`, `first`, `last`, `sum`, `mean`, `join`, `range`, `map`, `reduce`, `points`, and phase helpers `inPhase`, `phaseT`, `phaseAt`.
 
 Constants: `pi`, `e`, `tau`.
 
 Arrays: `[1, 2, x]`, `range(a, b, step?)`, `map(arr, fnName|"expr with _")`, `reduce(arr, fnName|"acc/_ expr", init)`, `points(xs, ys)` for SVG polylines.
+
+Coordinate helpers (prefer these over `170 - amp * 80`): `remap(v, in0, in1, out0, out1)`, `px(v, lo, hi, width)`, `py(v, lo, hi, height)` (SVG y-down). `@anchor name x=N y=N` injects `name_x` / `name_y`. (`map` remains the array mapper — use `remap` for ranges.)
 
 - Default: `sin` / `cos` / `tan` take **radians**
 - With `@angle deg` on the fence: `sin` / `cos` / `tan` / inverses use **degrees** (documented footgun fix)
@@ -240,6 +259,7 @@ Load from the toolbar **Examples…** menu, or open the files directly. Short in
 - [`examples/normal-density.md`](examples/normal-density.md) — Gaussian density XY plot with μ/σ sliders
 - [`examples/p0-demo.md`](examples/p0-demo.md) — overlay, log axes, legend, parametric/polar, soft errors
 - [`examples/p1-demo.md`](examples/p1-demo.md) — graph controls, self-edges, corner ports, shared env, plot tooltips
+- [`examples/p2-layout-data-demo.md`](examples/p2-layout-data-demo.md) — `layout=dagre`, `@data`, `remap`/`@anchor`
 - [`examples/p1-diagnostics-demo.md`](examples/p1-diagnostics-demo.md) — soft errors, degree hints, `ivm check` CLI
 - [`examples/p2-p3-demo.md`](examples/p2-p3-demo.md) — `@fn` / arrays / `@angle deg`, phases + timer scrub, local assets
 - [`examples/p3-p4-demo.md`](examples/p3-p4-demo.md) — bar/scatter/categorical, legend/annotate, zoom+dual axis, graph lanes/groups, `@scrub`, `@ns` typo warning

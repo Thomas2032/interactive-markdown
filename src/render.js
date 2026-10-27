@@ -162,6 +162,22 @@ export function mountIvm(container, fenceBody, options = {}) {
     if (parsed.namespace) Object.assign(env, nsState);
     Object.assign(env, local);
 
+    // @data tables → name_col arrays
+    for (const table of parsed.data || []) {
+      for (const col of table.columnNames || Object.keys(table.columns || {})) {
+        env[`${table.name}_${col}`] = (table.columns && table.columns[col]) ? [...table.columns[col]] : [];
+      }
+      const firstCol = (table.columnNames && table.columnNames[0]) || Object.keys(table.columns || {})[0];
+      const rowCount = firstCol && table.columns?.[firstCol] ? table.columns[firstCol].length : 0;
+      env[`${table.name}_len`] = rowCount;
+    }
+
+    // @anchor name → name_x / name_y
+    for (const a of parsed.anchors || []) {
+      env[`${a.name}_x`] = a.x;
+      env[`${a.name}_y`] = a.y;
+    }
+
     for (const c of parsed.controls) {
       if (c.kind !== "let" || !c.name || !c.expression) continue;
       try {

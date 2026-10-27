@@ -28,20 +28,27 @@
  *   @annotate x=N y=N "text" [dx=N] [dy=N] [axis=y|y2] [stroke=#hex]
  *   @grid on|off
  *   @scrub name duration=N [selector=.im-scrub]
- *   @graph
+ *   @data name                 — CSV/table → env name_col arrays (see body rows)
+ *     header1, header2
+ *     v11, v12
+ *   @anchor name x=N y=N      — named SVG point → env name_x / name_y
+ *   @graph [layout=dagre|flow|layered]
  *   @lane id: "Label" y=N [height=H] [fill=#hex]
  *   @group id: "Label"
  *   @animate [path=ortho|straight|curve] [quantity=N|name] [direction=forward|reverse] [speed=seconds|name]
- *   @node id: "Label" x=N y=N [kind=action|input|output|decision] [lane=id] [group=id]
+ *   @node id: "Label" [x=N] [y=N] [kind=action|input|output|decision] [lane=id] [group=id]
+ *     (omit both x= and y= when layout= is set — auto-positioned; explicit coords kept)
  *   @edge from -> to [from=side] [to=side]
  *     sides: left|right|top|bottom|top-left|top-right|bottom-left|bottom-right
  *            (aliases: tl|tr|bl|br)
+ *   @series … [from=dataName] — bare cats=/x=/y= column ids resolve to dataName_col
  *
  * Defaults: step=1, timer loop=true, speed=30. Omitted "Label" → UI shows name.
  * `@svg 200x80` stores width/height so the renderer can wrap non-root markup.
  * `@plot` builds a chart; optional trailing `@svg` is overlay chrome in the plot viewBox.
  * `@plot` / `@svg` stay exclusive of `@graph`. Controls (@slider/@timer/@let/…) may share a `@graph` fence.
  * `@animate` quantity/speed accept a number or a control name bound from the fence env.
+ * `@graph layout=dagre` (aliases flow|layered) auto-places nodes that omit both x= and y=.
  */
 
 /**
@@ -59,10 +66,10 @@
  *   units?: 'deg'|'rad',
  * }} Control
  * @typedef {"left"|"right"|"top"|"bottom"|"top-left"|"top-right"|"bottom-left"|"bottom-right"} GraphSide
- * @typedef {{ id: string, label: string, x: number, y: number, kind: string, lane?: string, group?: string }} GraphNode
+ * @typedef {{ id: string, label: string, x: number, y: number, kind: string, lane?: string, group?: string, autoPos?: boolean }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: string, quantity: number, direction: string, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[] }} GraphModel
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[], layout?: string|null }} GraphModel
  * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog'|'categorical', linthresh?: number, cats?: string[] }} PlotAxis
  * @typedef {{
  *   id?: string,
@@ -111,12 +118,16 @@
  * @typedef {{ name: string, duration: number, selector: string }} IvmScrub
  * @typedef {{ name: string, params: string[], expression: string }} IvmFn
  * @typedef {{ name: string, min: number, max: number }} IvmPhase
+ * @typedef {{ name: string, x: number, y: number }} IvmAnchor
+ * @typedef {{ name: string, columns: Record<string, (number|string)[]>, columnNames: string[] }} IvmDataTable
  * @typedef {{
  *   namespace: string|null,
  *   controls: Control[],
  *   fns: IvmFn[],
  *   angleMode: 'deg'|'rad'|null,
  *   phases: IvmPhase[],
+ *   data: IvmDataTable[],
+ *   anchors: IvmAnchor[],
  *   templateSvg: string|null,
  *   svgWidth: number|null,
  *   svgHeight: number|null,
@@ -134,6 +145,8 @@
  *   hint?: string|null,
  * }} IvmDiagnostic
  */
+
+import { applyGraphLayout, normalizeLayoutName } from "./graph-layout.js";
 
 const NODE_KINDS = new Set(["action", "input", "output", "decision"]);
 
@@ -181,6 +194,7 @@ const KIND_ALIASES = Object.freeze({
 const DIRECTIVE_NAMES = [
   "ns", "slider", "timer", "input", "toggle", "let", "calc", "fn", "angle", "phase",
   "svg", "plot", "axis", "series", "grid", "legend", "annotate", "scrub",
+  "data", "anchor",
   "graph", "lane", "group", "node", "edge", "animate",
   "s", "t", "i", "b", "l", "f", "mode",
 ];
@@ -373,6 +387,82 @@ function parseRange(raw) {
  * @param {string} body  fence interior (no ```ivm wrapper)
  * @returns {IvmBlock}
  */
+
+/**
+ * Split a CSV-ish line (supports simple double quotes).
+ * @param {string} line
+ * @returns {string[]}
+ */
+function splitCsvLine(line) {
+  const out = [];
+  let cur = "";
+  let inQ = false;
+  const s = String(line);
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQ) {
+      if (c === '"' && s[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (c === '"') {
+        inQ = false;
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQ = true;
+    } else if (c === ",") {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/**
+ * @param {string} raw
+ * @returns {string}
+ */
+function slugColumnName(raw) {
+  let s = String(raw || "").trim().replace(/[^A-Za-z0-9_]+/g, "_");
+  s = s.replace(/^_+|_+$/g, "");
+  if (!s) s = "col";
+  if (!/^[A-Za-z_]/.test(s)) s = "c_" + s;
+  return s;
+}
+
+/**
+ * @param {string} cell
+ * @returns {number|string}
+ */
+function parseDataCell(cell) {
+  const t = String(cell ?? "").trim();
+  if (t === "") return "";
+  if (/^-?\d+(?:\.\d+)?$/.test(t)) {
+    const n = Number(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return t;
+}
+
+/**
+ * Qualify a bare column ident with @data table name when from= is set.
+ * @param {string|null|undefined} from
+ * @param {string|null|undefined} expr
+ */
+function qualifyDataRef(from, expr) {
+  if (!from || expr == null) return expr;
+  const s = String(expr).trim();
+  const bare = s.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (!bare) return expr;
+  // Already qualified
+  if (bare[1].startsWith(from + "_")) return expr;
+  return `${from}_${bare[1]}`;
+}
+
 export function parseIvm(body) {
   const errors = [];
   /** @type {IvmDiagnostic[]} */
@@ -413,6 +503,10 @@ export function parseIvm(body) {
   let plot = null;
   /** @type {IvmScrub | null} */
   let scrub = null;
+  /** @type {IvmDataTable[]} */
+  const data = [];
+  /** @type {IvmAnchor[]} */
+  const anchors = [];
 
   const lines = String(body).replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -593,7 +687,7 @@ export function parseIvm(body) {
       const series = {};
       let tail = rest;
       const idMatch = tail.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
-      const reservedIds = /^(stroke|fill|fillOpacity|width|label|kind|axis|marker|size|y|x|r|t|theta|cats)$/i;
+      const reservedIds = /^(stroke|fill|fillOpacity|width|label|kind|axis|marker|size|from|y|x|r|t|theta|cats)$/i;
       if (idMatch && !reservedIds.test(idMatch[1])) {
         series.id = idMatch[1];
         tail = tail.slice(idMatch[0].length).trim();
@@ -661,6 +755,19 @@ export function parseIvm(body) {
           series.tMax = tr[1];
         } else report(i + 1, `@series: bad theta range ${flags.theta}`);
       }
+      /** @type {string|null} */
+      let fromData = null;
+      if (flags.from !== undefined) {
+        const fname = String(flags.from).trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(fname)) {
+          report(i + 1, `@series: bad from=${flags.from}`, {
+            code: "series-from",
+            hint: "from= must be a @data table name",
+          });
+        } else {
+          fromData = fname;
+        }
+      }
       // Continuations on following lines
       let j = i + 1;
       while (j < lines.length) {
@@ -687,6 +794,15 @@ export function parseIvm(body) {
         i = j;
         j++;
       }
+      // Qualify bare column refs when from=dataName
+      if (fromData) {
+        if (series.expression) series.expression = /** @type {string} */ (qualifyDataRef(fromData, series.expression));
+        if (series.xExpression) series.xExpression = /** @type {string} */ (qualifyDataRef(fromData, series.xExpression));
+        if (series.yExpression) series.yExpression = /** @type {string} */ (qualifyDataRef(fromData, series.yExpression));
+        if (series.catsExpression) series.catsExpression = /** @type {string} */ (qualifyDataRef(fromData, series.catsExpression));
+        if (series.rExpression) series.rExpression = /** @type {string} */ (qualifyDataRef(fromData, series.rExpression));
+      }
+
       // Infer / validate kind
       const explicitKind = series.kind;
       if (explicitKind === "bar") {
@@ -915,19 +1031,44 @@ export function parseIvm(body) {
       }
     }
 
-    // @graph — following @node / @edge lines are an editable graph
-    if (/^@graph$/i.test(line)) {
-      if (plot) report(i + 1, "@graph cannot mix with @plot", {
-        code: "mode-mix",
-        hint: "use separate fences, or drop @plot",
-      });
-      else if (graph) report(i + 1, "Duplicate @graph");
-      else graph = { nodes: [], edges: [], lanes: [], groups: [] };
-      i++;
-      continue;
-    }
+    // @graph [layout=dagre|flow|layered] — following @node / @edge lines are an editable graph
     if (/^@graph\b/i.test(line)) {
-      report(i + 1, "@graph takes no arguments");
+      if (plot) {
+        report(i + 1, "@graph cannot mix with @plot", {
+          code: "mode-mix",
+          hint: "use separate fences, or drop @plot",
+        });
+        i++;
+        continue;
+      }
+      if (graph) {
+        report(i + 1, "Duplicate @graph");
+        i++;
+        continue;
+      }
+      graph = { nodes: [], edges: [], lanes: [], groups: [], layout: null };
+      const rest = line.replace(/^@graph\b/i, "").trim();
+      if (rest) {
+        const flags = parseFlags(rest);
+        const unknown = Object.keys(flags).filter((k) => k !== "layout");
+        for (const k of unknown) {
+          report(i + 1, `@graph: unknown flag ${k}=${flags[k]}`, {
+            code: "graph-flag",
+            hint: "layout=dagre (aliases: flow, layered)",
+          });
+        }
+        if (flags.layout !== undefined) {
+          const normalized = normalizeLayoutName(flags.layout);
+          if (!normalized) {
+            report(i + 1, `@graph: unknown layout ${flags.layout}`, {
+              code: "graph-layout",
+              hint: "layout=dagre (aliases: flow, layered)",
+            });
+          } else {
+            graph.layout = normalized;
+          }
+        }
+      }
       i++;
       continue;
     }
@@ -944,7 +1085,7 @@ export function parseIvm(body) {
         }
         const quoted = parseQuotedPrefix(m[2]);
         if (!quoted) {
-          report(i + 1, `@node ${id}: expected "Label" x=N y=N`);
+          report(i + 1, `@node ${id}: expected "Label" [x=N] [y=N]`);
           i++;
           continue;
         }
@@ -954,8 +1095,11 @@ export function parseIvm(body) {
           continue;
         }
         const flags = parseFlags(quoted.rest);
-        const x = flags.x !== undefined ? Number(flags.x) : 48;
-        const y = flags.y !== undefined ? Number(flags.y) : 48;
+        const hasX = flags.x !== undefined;
+        const hasY = flags.y !== undefined;
+        const autoPos = !hasX && !hasY;
+        const x = hasX ? Number(flags.x) : 48;
+        const y = hasY ? Number(flags.y) : 48;
         const rawKind = flags.kind !== undefined ? String(flags.kind).toLowerCase() : "action";
         if (!NODE_KINDS.has(rawKind)) {
           report(i + 1, `@node ${id}: unknown kind ${flags.kind}`, {
@@ -971,8 +1115,15 @@ export function parseIvm(body) {
           y: Number.isFinite(y) ? y : 48,
           kind: NODE_KINDS.has(rawKind) ? rawKind : "action",
         };
+        if (autoPos) node.autoPos = true;
         if (flags.lane) node.lane = String(flags.lane);
         if (flags.group) node.group = String(flags.group);
+        // Without layout=, auto nodes still need distinct defaults (legacy stacking avoided lightly)
+        if (autoPos && !graph.layout) {
+          const idx = graph.nodes.length;
+          node.x = 48 + (idx % 3) * 220;
+          node.y = 48 + Math.floor(idx / 3) * 96;
+        }
         graph.nodes.push(node);
         i++;
         continue;
@@ -1048,6 +1199,99 @@ export function parseIvm(body) {
 
     // Controls and @ns may share a @graph fence; @svg/@plot stay exclusive (checked above).
     // Fall through so @slider/@timer/@let/@ns parse below. Reject leftover graph junk after controls.
+
+    // @data name — CSV/table body → env name_col arrays
+    {
+      const m = line.match(/^@data\s+([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*$/i);
+      if (m) {
+        const name = m[1];
+        if (data.some((d) => d.name === name)) {
+          report(i + 1, `@data ${name}: duplicate table`, { code: "data-dup" });
+          i++;
+          continue;
+        }
+        let j = i + 1;
+        /** @type {string[]} */
+        const rawLines = [];
+        while (j < lines.length) {
+          const raw = lines[j];
+          const trimmed = raw.trim();
+          if (!trimmed) break;
+          if (trimmed.startsWith("#")) {
+            j++;
+            continue;
+          }
+          if (trimmed.startsWith("@")) break;
+          rawLines.push(trimmed);
+          j++;
+        }
+        if (!rawLines.length) {
+          report(i + 1, `@data ${name}: expected header row`, {
+            code: "data",
+            hint: "month, value\\nJan, 40",
+          });
+          i = j;
+          continue;
+        }
+        const headers = splitCsvLine(rawLines[0]).map(slugColumnName);
+        if (!headers.length || headers.every((h) => !h)) {
+          report(i + 1, `@data ${name}: empty header`, { code: "data" });
+          i = j;
+          continue;
+        }
+        // Dedupe column names
+        /** @type {Record<string, number>} */
+        const seen = Object.create(null);
+        const columnNames = headers.map((h) => {
+          const base = h || "col";
+          if (seen[base] == null) {
+            seen[base] = 1;
+            return base;
+          }
+          seen[base] += 1;
+          return `${base}_${seen[base]}`;
+        });
+        /** @type {Record<string, (number|string)[]>} */
+        const columns = Object.create(null);
+        for (const col of columnNames) columns[col] = [];
+        for (let r = 1; r < rawLines.length; r++) {
+          const cells = splitCsvLine(rawLines[r]);
+          for (let c = 0; c < columnNames.length; c++) {
+            columns[columnNames[c]].push(parseDataCell(cells[c] ?? ""));
+          }
+        }
+        data.push({ name, columns, columnNames });
+        i = j;
+        continue;
+      }
+    }
+
+    // @anchor name x=N y=N  (optional colon after name)
+    {
+      const m = line.match(/^@anchor\s+([A-Za-z_][A-Za-z0-9_]*)\s*:?\s*(.*)$/i);
+      if (m) {
+        const name = m[1];
+        if (anchors.some((a) => a.name === name)) {
+          report(i + 1, `@anchor ${name}: duplicate name`, { code: "anchor-dup" });
+          i++;
+          continue;
+        }
+        const flags = parseFlags(m[2] || "");
+        const x = flags.x !== undefined ? Number(flags.x) : NaN;
+        const y = flags.y !== undefined ? Number(flags.y) : NaN;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          report(i + 1, `@anchor ${name}: requires x= and y=`, {
+            code: "anchor",
+            hint: '@anchor tip x=170 y=40',
+          });
+          i++;
+          continue;
+        }
+        anchors.push({ name, x, y });
+        i++;
+        continue;
+      }
+    }
 
     // @svg [WxH] — remainder of fence is SVG markup (overlay when @plot is set)
     if (/^@svg\b/i.test(line)) {
@@ -1264,7 +1508,11 @@ export function parseIvm(body) {
     i++;
   }
 
-  return { namespace, controls, fns, angleMode, phases, templateSvg, svgWidth, svgHeight, graph, plot, scrub, errors, diagnostics };
+  if (graph && graph.layout) {
+    applyGraphLayout(graph);
+  }
+
+  return { namespace, controls, fns, angleMode, phases, data, anchors, templateSvg, svgWidth, svgHeight, graph, plot, scrub, errors, diagnostics };
 }
 
 /**
