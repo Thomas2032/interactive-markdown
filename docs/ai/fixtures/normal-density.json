@@ -1,0 +1,42 @@
+{
+  "title": "Normal density",
+  "markdown_prose": "Drag **μ** and **σ** to reshape the Gaussian PDF.",
+  "fences": [
+    {
+      "type": "plot",
+      "controls": [
+        {
+          "kind": "slider",
+          "name": "mu",
+          "min": -5,
+          "max": 5,
+          "default": 0,
+          "step": 0.1,
+          "label": "μ (mean)"
+        },
+        {
+          "kind": "slider",
+          "name": "sigma",
+          "min": 0.5,
+          "max": 4,
+          "default": 1.5,
+          "step": 0.1,
+          "label": "σ (std dev)"
+        }
+      ],
+      "axes": [
+        { "which": "x", "min": -10, "max": 10, "step": 2, "label": "x" },
+        { "which": "y", "min": 0, "max": 0.8, "step": 0.2, "label": "density" }
+      ],
+      "series": [
+        {
+          "id": "density",
+          "stroke": "#6d28d9",
+          "fill": "#7c3aed",
+          "fillOpacity": 0.25,
+          "y": "(1/(sigma*sqrt(2*pi))) * exp(-0.5*((x-mu)/sigma)^2)"
+        }
+      ]
+    }
+  ]
+}

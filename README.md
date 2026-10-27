@@ -71,7 +71,7 @@ Pick the fence mode from the ask, then stay inside its mixing rules.
 
 **Mixing rules:** `@plot` may end with a trailing `@svg` overlay (plot viewBox `0 0 W H`). `@graph` is exclusive of `@plot` and `@svg` — put a flowchart beside a plot in two fences and share state with `@ns`. Controls (`@slider`, `@timer`, `@let`, …) work in every mode.
 
-For copy-paste recipes, see [docs/golden-snippets.md](docs/golden-snippets.md).
+For copy-paste recipes, see [docs/golden-snippets.md](docs/golden-snippets.md). For LLM / agent generation (system prompt, compact protocol, JSON schema, convert script), see [docs/ai/README.md](docs/ai/README.md).
 
 ## IVM dialect (quick reference)
 

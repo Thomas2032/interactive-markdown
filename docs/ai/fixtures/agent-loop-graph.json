@@ -1,0 +1,22 @@
+{
+  "title": "Agent loop",
+  "markdown_prose": "A tiny perceive → think → act cycle (`layout=dagre`).",
+  "fences": [
+    {
+      "type": "graph",
+      "layout": "dagre",
+      "nodes": [
+        { "id": "start", "label": "Start", "kind": "input" },
+        { "id": "think", "label": "Think" },
+        { "id": "act", "label": "Act" },
+        { "id": "done", "label": "Done", "kind": "output" }
+      ],
+      "edges": [
+        { "from": "start", "to": "think" },
+        { "from": "think", "to": "act" },
+        { "from": "act", "to": "think" },
+        { "from": "act", "to": "done" }
+      ]
+    }
+  ]
+}
