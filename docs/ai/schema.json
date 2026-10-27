@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Thomas2032/interactive-markdown/docs/ai/schema.json",
+  "title": "InteractiveMarkdownDocument",
+  "description": "Intermediate document for Mode B generation. Convert with schema-to-ivm.mjs. Reflects Interactive Markdown 0.11.0 capabilities only.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Optional document title (emitted as a Markdown H1 when present)."
+    },
+    "markdown_prose": {
+      "type": "string",
+      "description": "Markdown body placed before the first fence (headings, paragraphs, lists). May be empty."
+    },
+    "fences": {
+      "type": "array",
+      "description": "Ordered IVM fences. Each fence has exactly one mode: svg | plot | graph.",
+      "items": { "$ref": "#/$defs/fence" }
+    }
+  },
+  "required": ["fences"],
+  "$defs": {
+    "controlSlider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "min", "max", "default"],
+      "properties": {
+        "kind": { "const": "slider" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": { "type": "number" },
+        "step": { "type": "number" },
+        "units": { "enum": ["deg", "rad"] },
+        "label": { "type": "string" }
+      }
+    },
+    "controlTimer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "min", "max", "default"],
+      "properties": {
+        "kind": { "const": "timer" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": { "type": "number" },
+        "step": { "type": "number" },
+        "speed": { "type": "number" },
+        "loop": { "type": "boolean" },
+        "units": { "enum": ["deg", "rad"] },
+        "label": { "type": "string" }
+      }
+    },
+    "controlInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "const": "input" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "default": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "controlToggle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "const": "toggle" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "default": { "type": "boolean" },
+        "label": { "type": "string" }
+      }
+    },
+    "controlLet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "expr"],
+      "properties": {
+        "kind": { "const": "let" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "expr": { "type": "string" }
+      }
+    },
+    "controlFn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "params", "expr"],
+      "properties": {
+        "kind": { "const": "fn" },
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "params": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+        },
+        "expr": { "type": "string" }
+      }
+    },
+    "control": {
+      "oneOf": [
+        { "$ref": "#/$defs/controlSlider" },
+        { "$ref": "#/$defs/controlTimer" },
+        { "$ref": "#/$defs/controlInput" },
+        { "$ref": "#/$defs/controlToggle" },
+        { "$ref": "#/$defs/controlLet" },
+        { "$ref": "#/$defs/controlFn" }
+      ]
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "min", "max"],
+      "properties": {
+        "name": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "scrub": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "duration"],
+      "properties": {
+        "name": { "type": "string" },
+        "duration": { "type": "number" },
+        "selector": { "type": "string" }
+      }
+    },
+    "dataTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "headers", "rows"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "headers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": ["string", "number", "boolean", "null"] }
+          }
+        }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "x", "y"],
+      "properties": {
+        "name": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "sharedPreamble": {
+      "type": "object",
+      "description": "Directives allowed in every fence mode.",
+      "properties": {
+        "ns": { "type": "string", "description": "@ns shared namespace" },
+        "angle": { "enum": ["deg", "rad"] },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/control" }
+        },
+        "phases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/phase" }
+        },
+        "scrubs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scrub" }
+        },
+        "data": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataTable" }
+        },
+        "anchors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/anchor" }
+        },
+        "prose_after": {
+          "type": "string",
+          "description": "Markdown inserted after this fence in the document."
+        }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["which", "min", "max"],
+      "properties": {
+        "which": { "enum": ["x", "y", "y2"] },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number" },
+        "scale": { "enum": ["linear", "log", "symlog", "categorical"] },
+        "cats": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "linthresh": { "type": "number" },
+        "label": { "type": "string" }
+      }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["y", "bar", "scatter", "parametric", "polar"] },
+        "from": { "type": "string", "description": "@data table name for column qualification" },
+        "axis": { "enum": ["y", "y2"] },
+        "marker": { "enum": ["circle", "square", "diamond"] },
+        "size": { "type": "number" },
+        "stroke": { "type": "string" },
+        "fill": { "type": "string" },
+        "fillOpacity": { "type": "number" },
+        "width": { "type": "number" },
+        "label": { "type": "string" },
+        "y": { "type": "string", "description": "Cartesian y= expression, or bar/scatter y source" },
+        "x": { "type": "string", "description": "Parametric/scatter x expression or array literal text" },
+        "t": { "type": "string", "description": "Parametric t=min..max as string, e.g. \"0..6.2832\"" },
+        "r": { "type": "string" },
+        "theta": { "type": "string", "description": "Polar theta=min..max as string" },
+        "cats": { "type": "string", "description": "Bar categories expression or comma list" }
+      }
+    },
+    "annotate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "text"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "text": { "type": "string" },
+        "dx": { "type": "number" },
+        "dy": { "type": "number" },
+        "axis": { "enum": ["y", "y2"] },
+        "stroke": { "type": "string" }
+      }
+    },
+    "plotFence": {
+      "allOf": [
+        { "$ref": "#/$defs/sharedPreamble" },
+        {
+          "type": "object",
+          "required": ["type", "axes", "series"],
+          "properties": {
+            "type": { "const": "plot" },
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "grid": { "type": "boolean" },
+            "legend": {
+              "description": "true/false or position string",
+              "oneOf": [
+                { "type": "boolean" },
+                { "enum": ["top-right", "top-left", "bottom-right", "bottom-left"] }
+              ]
+            },
+            "lockAspect": { "type": "boolean" },
+            "zoom": { "type": "boolean" },
+            "axes": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/axis" }
+            },
+            "series": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/series" }
+            },
+            "legend_pos": {
+              "enum": ["top-right", "top-left", "bottom-right", "bottom-left"],
+              "description": "Optional @legend line (in addition to plot legend= flag)"
+            },
+            "annotations": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/annotate" }
+            },
+            "svg_overlay": {
+              "type": "string",
+              "description": "Trailing @svg overlay markup (plot viewBox)"
+            }
+          }
+        }
+      ]
+    },
+    "svgFence": {
+      "allOf": [
+        { "$ref": "#/$defs/sharedPreamble" },
+        {
+          "type": "object",
+          "required": ["type", "markup"],
+          "properties": {
+            "type": { "const": "svg" },
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "markup": {
+              "type": "string",
+              "description": "SVG body; may be a full <svg> root or inner markup when width/height set"
+            }
+          }
+        }
+      ]
+    },
+    "graphNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "label": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "kind": { "enum": ["action", "input", "output", "decision"] },
+        "lane": { "type": "string" },
+        "group": { "type": "string" }
+      }
+    },
+    "graphEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "from_port": {
+          "enum": ["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right", "tl", "tr", "bl", "br"]
+        },
+        "to_port": {
+          "enum": ["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right", "tl", "tr", "bl", "br"]
+        }
+      }
+    },
+    "graphLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "y"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "y": { "type": "number" },
+        "height": { "type": "number" },
+        "fill": { "type": "string" }
+      }
+    },
+    "graphGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "graphAnimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "enum": ["ortho", "straight", "curve"] },
+        "quantity": { "type": ["number", "string"] },
+        "direction": { "enum": ["forward", "reverse"] },
+        "speed": { "type": ["number", "string"] }
+      }
+    },
+    "graphFence": {
+      "allOf": [
+        { "$ref": "#/$defs/sharedPreamble" },
+        {
+          "type": "object",
+          "required": ["type", "nodes", "edges"],
+          "properties": {
+            "type": { "const": "graph" },
+            "layout": { "enum": ["dagre", "flow", "layered"] },
+            "nodes": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/graphNode" }
+            },
+            "edges": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/graphEdge" }
+            },
+            "lanes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/graphLane" }
+            },
+            "groups": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/graphGroup" }
+            },
+            "animate": { "$ref": "#/$defs/graphAnimate" }
+          }
+        }
+      ]
+    },
+    "fence": {
+      "oneOf": [
+        { "$ref": "#/$defs/plotFence" },
+        { "$ref": "#/$defs/svgFence" },
+        { "$ref": "#/$defs/graphFence" }
+      ]
+    }
+  }
+}
