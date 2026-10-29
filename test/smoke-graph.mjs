@@ -288,6 +288,36 @@ assert("serialize lane", /@lane fe:/.test(laneSer) && /lane=fe/.test(laneSer));
 assert("serialize group", /@group api:/.test(laneSer) && /group=api/.test(laneSer));
 
 
+// Zoom / pan viewport (CSS transform; model coords unchanged)
+const zoomParsed = parseIvm(`@graph\n@node a: "A" x=40 y=40\n@node b: "B" x=200 y=40\n@edge a -> b\n`);
+assert("graph zoom default on", zoomParsed.graph?.zoom === true);
+const noz = parseIvm(`@graph nozoom\n@node a: "A" x=1 y=2\n`);
+assert("graph nozoom", noz.graph?.zoom === false && noz.errors.length === 0, JSON.stringify(noz.errors));
+const zoomHost = document.getElementById("host");
+zoomHost.innerHTML = "";
+const zoomMount = mountGraphEditor(zoomHost, zoomParsed.graph);
+assert("zoomable canvas", !!zoomHost.querySelector(".im-graph-canvas.im-graph-zoomable"));
+const stage = zoomHost.querySelector(".im-graph-stage");
+const beforeX = zoomParsed.graph.nodes[0].x;
+zoomHost.querySelector(".im-graph-canvas").dispatchEvent(
+  new window.Event("wheel", { bubbles: true, cancelable: true })
+);
+// linkedom may not fully implement WheelEvent; call resetView and check API
+assert("resetView API", typeof zoomMount.resetView === "function");
+zoomMount.resetView();
+assert("reset transform identity", !stage.style.transform || /scale\(1\)/.test(stage.style.transform) || stage.style.transform.includes("scale(1)"));
+const afterModel = zoomMount.getModel();
+assert("zoom does not mutate node x", afterModel.nodes[0].x === beforeX);
+zoomMount.destroy();
+const nozHost = document.createElement("div");
+document.body.appendChild(nozHost);
+const nozMount = mountGraphEditor(nozHost, noz.graph);
+assert("nozoom skips zoomable", !nozHost.querySelector(".im-graph-zoomable"));
+nozMount.destroy();
+const serNoz = serializeGraph(noz.graph);
+assert("serialize graph nozoom", /@graph nozoom\b/.test(serNoz), serNoz);
+
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 

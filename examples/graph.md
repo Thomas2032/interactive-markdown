@@ -15,4 +15,4 @@ This fence is a directed graph. Edit `@node` / `@edge` in the source — the pre
 @edge act -> output
 ```
 
-Node `kind` can be `input`, `action` (default), `output`, or `decision`. Use `@graph layout=dagre` to auto-place nodes that omit both `x=` and `y=`.
+Node `kind` can be `input`, `action` (default), `output`, or `decision`. Use `@graph layout=dagre` to auto-place nodes that omit both `x=` and `y=`. Preview zoom/pan is on by default: scroll to zoom, drag empty canvas to pan, double-click empty area to reset (`nozoom` to disable).

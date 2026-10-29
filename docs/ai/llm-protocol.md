@@ -45,7 +45,7 @@ Defaults: `step=1`, timer `loop` true, `speed=30`. Omit `"Label"` → UI shows t
 ## Plot / SVG / graph kernels
 
 ```
-@plot [WxH] [grid|nogrid] [legend|nolegend|legend=pos] [lockAspect] [zoom]
+@plot [WxH] [grid|nogrid] [legend|nolegend|legend=pos] [lockAspect] [zoom|nozoom]
 @axis x|y|y2: min..max [step=S] [scale=linear|log|symlog|categorical] [cats=A,B] [linthresh=N] ["Label"]
 @series [id] [kind=y|bar|scatter|parametric|polar] [from=dataName] [axis=y|y2] [marker=circle|square|diamond] [size=N] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N] [label="Name"]
   y = expr                    # Cartesian free var x
@@ -60,7 +60,7 @@ Defaults: `step=1`, timer `loop` true, `speed=30`. Omit `"Label"` → UI shows t
 @svg [WxH]
   <!-- markup; bind with {{expr}} only -->
 
-@graph [layout=dagre|flow|layered]
+@graph [layout=dagre|flow|layered] [zoom|nozoom]
 @lane id: "Label" y=N [height=H] [fill=#hex]
 @group id: "Label"
 @node id: "Label" [x=N] [y=N] kind=action|input|output|decision [lane=id] [group=id]

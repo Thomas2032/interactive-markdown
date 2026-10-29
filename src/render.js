@@ -640,7 +640,7 @@ export function mountIvm(container, fenceBody, options = {}) {
       hideTooltip();
     });
 
-    if (parsed.plot.zoom) {
+    if (parsed.plot.zoom !== false) {
       /** @type {{ x: number, y: number, view: object } | null} */
       let drag = null;
       const onWheel = (ev) => {
@@ -650,22 +650,27 @@ export function mountIvm(container, fenceBody, options = {}) {
           view: plotView,
         });
         const factor = ev.deltaY < 0 ? 0.9 : 1.1;
-        const xMid = (model.x.min + model.x.max) / 2;
-        const yMid = (model.y.min + model.y.max) / 2;
-        const xSpan = ((model.x.max - model.x.min) * factor) / 2;
-        const ySpan = ((model.y.max - model.y.min) * factor) / 2;
+        const rect = svgHost.getBoundingClientRect();
+        const fx =
+          rect.width > 0 ? Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)) : 0.5;
+        const fy =
+          rect.height > 0 ? Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height)) : 0.5;
+        const xAt = model.x.min + fx * (model.x.max - model.x.min);
+        const yAt = model.y.max - fy * (model.y.max - model.y.min);
+        const xSpan = (model.x.max - model.x.min) * factor;
+        const ySpan = (model.y.max - model.y.min) * factor;
         plotView = {
           ...(plotView || {}),
-          xMin: xMid - xSpan,
-          xMax: xMid + xSpan,
-          yMin: yMid - ySpan,
-          yMax: yMid + ySpan,
+          xMin: xAt - fx * xSpan,
+          xMax: xAt + (1 - fx) * xSpan,
+          yMin: yAt - (1 - fy) * ySpan,
+          yMax: yAt + fy * ySpan,
         };
         if (model.y2) {
-          const y2Mid = (model.y2.min + model.y2.max) / 2;
-          const y2Span = ((model.y2.max - model.y2.min) * factor) / 2;
-          plotView.y2Min = y2Mid - y2Span;
-          plotView.y2Max = y2Mid + y2Span;
+          const y2At = model.y2.max - fy * (model.y2.max - model.y2.min);
+          const y2Span = (model.y2.max - model.y2.min) * factor;
+          plotView.y2Min = y2At - (1 - fy) * y2Span;
+          plotView.y2Max = y2At + fy * y2Span;
         }
         lastFilled = null;
         rebind();

@@ -474,6 +474,21 @@ body {
   user-select: none;
 }
 
+.im-graph-canvas.im-graph-zoomable {
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.im-graph-canvas.im-graph-zoomable.is-panning {
+  cursor: grabbing;
+}
+
+.im-graph-canvas.im-graph-zoomable .im-graph-stage {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
 .im-graph-canvas:focus {
   border-color: #334155;
   box-shadow: inset 0 0 0 1px #334155;

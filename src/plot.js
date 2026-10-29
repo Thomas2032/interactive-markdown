@@ -82,7 +82,7 @@ export function normalizePlot(plot) {
     legend: plot?.legend !== false,
     legendPos,
     lockAspect: plot?.lockAspect === true,
-    zoom: plot?.zoom === true,
+    zoom: plot?.zoom !== false,
     samples: Math.max(32, Math.min(2000, Math.round(finiteOr(plot?.samples, DEFAULT_SAMPLES)))),
     x: normalizeAxis(x, "x"),
     y: normalizeAxis(y, "y"),
@@ -1135,7 +1135,7 @@ export function serializePlotLines(plot) {
   if (model.legend === false) legendFlag = " nolegend";
   else if (model.legendPos && model.legendPos !== "top-right") legendFlag = ` legend=${model.legendPos}`;
   const aspectFlag = model.lockAspect ? " lockAspect" : "";
-  const zoomFlag = model.zoom ? " zoom" : "";
+  const zoomFlag = model.zoom === false ? " nozoom" : "";
   lines.push(`@plot${size}${gridFlag}${legendFlag}${aspectFlag}${zoomFlag}`);
   lines.push(serializeAxis("x", model.x));
   lines.push(serializeAxis("y", model.y));
