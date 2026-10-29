@@ -15,7 +15,7 @@
  *   @phase  name: min..max          (named timeline span for inPhase/phaseT/phaseAt)
  *   @svg [WxH]
  *   …markup…   (remainder of fence; use {{expr}} in attrs/text)
- *   @plot [WxH] [grid|nogrid] [legend|nolegend|legend=pos] [lockAspect] [zoom]
+ *   @plot [WxH] [grid|nogrid] [legend|nolegend|legend=pos] [lockAspect] [zoom|nozoom]
  *   @axis x|y|y2: min..max [step=S] [scale=linear|log|symlog|categorical] [cats=A,B,C] ["Label"]
  *   @series [id] [kind=y|bar|scatter|parametric|polar] [axis=y|y2] [marker=circle|square|diamond]
  *           [size=N] [stroke=#hex] [fill=#hex] [fillOpacity=N] [width=N] [label="Name"]
@@ -32,7 +32,7 @@
  *     header1, header2
  *     v11, v12
  *   @anchor name x=N y=N      — named SVG point → env name_x / name_y
- *   @graph [layout=dagre|flow|layered]
+ *   @graph [layout=dagre|flow|layered] [zoom|nozoom]
  *   @lane id: "Label" y=N [height=H] [fill=#hex]
  *   @group id: "Label"
  *   @animate [path=ortho|straight|curve] [quantity=N|name] [direction=forward|reverse] [speed=seconds|name]
@@ -69,7 +69,7 @@
  * @typedef {{ id: string, label: string, x: number, y: number, kind: string, lane?: string, group?: string, autoPos?: boolean }} GraphNode
  * @typedef {{ from: string, to: string, fromSide?: GraphSide, toSide?: GraphSide }} GraphEdge
  * @typedef {{ path: string, quantity: number, direction: string, speed: number, quantityFrom?: string, speedFrom?: string }} GraphMotion
- * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[], layout?: string|null }} GraphModel
+ * @typedef {{ nodes: GraphNode[], edges: GraphEdge[], animated?: boolean, motion?: GraphMotion, lanes?: GraphLane[], groups?: GraphGroup[], layout?: string|null, zoom?: boolean }} GraphModel
  * @typedef {{ min: number, max: number, step?: number, label?: string, scale?: 'linear'|'log'|'symlog'|'categorical', linthresh?: number, cats?: string[] }} PlotAxis
  * @typedef {{
  *   id?: string,
@@ -546,7 +546,7 @@ export function parseIvm(body) {
         legend: true,
         legendPos: "top-right",
         lockAspect: false,
-        zoom: false,
+        zoom: true,
         x: null,
         y: null,
         y2: null,
@@ -567,7 +567,8 @@ export function parseIvm(body) {
         if (/\bnolegend\b/i.test(flags)) plot.legend = false;
         else if (/\blegend\b/i.test(flags)) plot.legend = true;
         if (/\b(lockAspect|aspect)\b/i.test(flags)) plot.lockAspect = true;
-        if (/\bzoom\b/i.test(flags)) plot.zoom = true;
+        if (/\bnozoom\b/i.test(flags)) plot.zoom = false;
+        else if (/\bzoom\b/i.test(flags)) plot.zoom = true;
         const legendPosFlag = flags.match(/\blegend\s*=\s*(top-right|top-left|bottom-right|bottom-left)\b/i);
         if (legendPosFlag) {
           plot.legend = true;
@@ -575,7 +576,7 @@ export function parseIvm(body) {
         }
         const leftover = flags
           .replace(/\blegend\s*=\s*(top-right|top-left|bottom-right|bottom-left)\b/gi, "")
-          .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect|zoom)\b/gi, "")
+          .replace(/\b(nogrid|grid|nolegend|legend|lockAspect|aspect|nozoom|zoom)\b/gi, "")
           .trim();
         if (leftover) report(i + 1, `@plot: unknown ${leftover}`);
       }
@@ -1046,15 +1047,33 @@ export function parseIvm(body) {
         i++;
         continue;
       }
-      graph = { nodes: [], edges: [], lanes: [], groups: [], layout: null };
+      graph = { nodes: [], edges: [], lanes: [], groups: [], layout: null, zoom: true };
       const rest = line.replace(/^@graph\b/i, "").trim();
       if (rest) {
-        const flags = parseFlags(rest);
+        let flagSrc = rest;
+        if (/\bnozoom\b/i.test(flagSrc)) {
+          graph.zoom = false;
+          flagSrc = flagSrc.replace(/\bnozoom\b/gi, " ").trim();
+        } else if (/\bzoom\b/i.test(flagSrc)) {
+          graph.zoom = true;
+          flagSrc = flagSrc.replace(/\bzoom\b/gi, " ").trim();
+        }
+        const flags = parseFlags(flagSrc);
         const unknown = Object.keys(flags).filter((k) => k !== "layout");
         for (const k of unknown) {
           report(i + 1, `@graph: unknown flag ${k}=${flags[k]}`, {
             code: "graph-flag",
-            hint: "layout=dagre (aliases: flow, layered)",
+            hint: "layout=dagre (aliases: flow, layered); zoom|nozoom",
+          });
+        }
+        const leftoverBare = flagSrc
+          .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (leftoverBare) {
+          report(i + 1, `@graph: unknown ${leftoverBare}`, {
+            code: "graph-flag",
+            hint: "layout=dagre (aliases: flow, layered); zoom|nozoom",
           });
         }
         if (flags.layout !== undefined) {

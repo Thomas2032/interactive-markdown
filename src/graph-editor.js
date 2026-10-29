@@ -143,7 +143,10 @@ export function quoteGraphLabel(label) {
  * @returns {string}
  */
 export function serializeGraph(model) {
-  const lines = [model.layout ? `@graph layout=${model.layout}` : "@graph"];
+  let graphHead = "@graph";
+  if (model.layout) graphHead += ` layout=${model.layout}`;
+  if (model.zoom === false) graphHead += " nozoom";
+  const lines = [graphHead];
   if (model.animated) lines.push(serializeAnimate(model.motion));
   for (const lane of model.lanes || []) {
     let line = `@lane ${lane.id}: ${quoteGraphLabel(lane.label)} y=${Math.round(lane.y)} height=${Math.round(lane.height)}`;
@@ -358,6 +361,7 @@ function carry(model, next) {
   if (next.lanes == null && model && model.lanes) next.lanes = model.lanes.map((l) => ({ ...l }));
   if (next.groups == null && model && model.groups) next.groups = model.groups.map((g) => ({ ...g }));
   if (next.layout == null && model && model.layout) next.layout = model.layout;
+  if (next.zoom == null && model && model.zoom != null) next.zoom = model.zoom;
   return next;
 }
 
@@ -1014,13 +1018,133 @@ export function mountGraphEditor(container, initial, options = {}) {
     if (opts.commit !== false) commit();
   }
 
-  // Read-only preview: paint + live motion only (no drag / ports / write-back).
+  /** Viewport zoom/pan via CSS transform — node model coords stay unchanged. */
+  let viewScale = 1;
+  let viewTx = 0;
+  let viewTy = 0;
+  /** @type {{ x: number, y: number, tx: number, ty: number, pointerId: number } | null} */
+  let panning = null;
+  const zoomEnabled = options.zoom !== false && initial?.zoom !== false;
+  /** @type {Array<() => void>} */
+  const viewportCleanups = [];
+
+  function applyViewTransform() {
+    stage.style.transformOrigin = "0 0";
+    stage.style.transform = `translate(${viewTx}px, ${viewTy}px) scale(${viewScale})`;
+  }
+
+  function resetViewTransform() {
+    viewScale = 1;
+    viewTx = 0;
+    viewTy = 0;
+    applyViewTransform();
+  }
+
+  function installViewportGestures() {
+    if (!zoomEnabled) return;
+    canvas.classList.add("im-graph-zoomable");
+    canvas.style.touchAction = "none";
+    const hint = "Scroll to zoom, drag background to pan, double-click empty area to reset";
+    canvas.title = canvas.title ? `${canvas.title} · ${hint}` : hint;
+    applyViewTransform();
+
+    const isBackgroundTarget = (target) => {
+      const el = /** @type {Element | null} */ (target);
+      if (!el || typeof el.closest !== "function") return true;
+      if (el.closest(".im-graph-node")) return false;
+      if (el.closest(".im-graph-port")) return false;
+      if (el.closest(".im-graph-rename")) return false;
+      return true;
+    };
+
+    const onWheel = (e) => {
+      if (dead) return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const next = Math.min(4, Math.max(0.25, viewScale * factor));
+      if (next === viewScale) return;
+      const sx = (cx - viewTx) / viewScale;
+      const sy = (cy - viewTy) / viewScale;
+      viewScale = next;
+      viewTx = cx - sx * viewScale;
+      viewTy = cy - sy * viewScale;
+      applyViewTransform();
+    };
+
+    const onPanDown = (e) => {
+      if (dead) return;
+      if (e.button != null && e.button !== 0) return;
+      if (!isBackgroundTarget(e.target)) return;
+      panning = {
+        x: e.clientX,
+        y: e.clientY,
+        tx: viewTx,
+        ty: viewTy,
+        pointerId: e.pointerId,
+      };
+      canvas.classList.add("is-panning");
+      try {
+        canvas.setPointerCapture?.(e.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+    };
+
+    const onPanMove = (e) => {
+      if (!panning || e.pointerId !== panning.pointerId) return;
+      viewTx = panning.tx + (e.clientX - panning.x);
+      viewTy = panning.ty + (e.clientY - panning.y);
+      applyViewTransform();
+    };
+
+    const onPanUp = (e) => {
+      if (!panning) return;
+      if (e && e.pointerId != null && e.pointerId !== panning.pointerId) return;
+      panning = null;
+      canvas.classList.remove("is-panning");
+    };
+
+    const onDblReset = (e) => {
+      if (dead) return;
+      if (!isBackgroundTarget(e.target)) return;
+      const zoomed = viewScale !== 1 || viewTx !== 0 || viewTy !== 0;
+      if (!zoomed && editable) return; // editable dblclick still adds a node
+      e.preventDefault();
+      e.stopPropagation();
+      resetViewTransform();
+    };
+
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("pointerdown", onPanDown);
+    canvas.addEventListener("pointermove", onPanMove);
+    canvas.addEventListener("pointerup", onPanUp);
+    canvas.addEventListener("pointercancel", onPanUp);
+    canvas.addEventListener("dblclick", onDblReset, true);
+    viewportCleanups.push(() => {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("pointerdown", onPanDown);
+      canvas.removeEventListener("pointermove", onPanMove);
+      canvas.removeEventListener("pointerup", onPanUp);
+      canvas.removeEventListener("pointercancel", onPanUp);
+      canvas.removeEventListener("dblclick", onDblReset, true);
+      canvas.classList.remove("is-panning");
+    });
+  }
+
+  installViewportGestures();
+
+  // Read-only preview: paint + live motion + viewport gestures (no drag / ports / write-back).
   if (!editable) {
     paint();
     return {
       destroy() {
         dead = true;
         clearTimeout(flashTimer);
+        for (const fn of viewportCleanups) fn();
         container.innerHTML = "";
       },
       getModel() {
@@ -1030,6 +1154,7 @@ export function mountGraphEditor(container, initial, options = {}) {
         liveMotion = patch ? { ...patch } : null;
         if (!dead) paint();
       },
+      resetView: resetViewTransform,
     };
   }
 
@@ -1093,7 +1218,9 @@ export function mountGraphEditor(container, initial, options = {}) {
 
   function pointInStage(e) {
     const rect = stage.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    // Divide by viewScale: getBoundingClientRect is in screen px after CSS transform.
+    const s = viewScale || 1;
+    return { x: (e.clientX - rect.left) / s, y: (e.clientY - rect.top) / s };
   }
 
   function beginRename(id) {
@@ -1351,6 +1478,7 @@ export function mountGraphEditor(container, initial, options = {}) {
     destroy() {
       dead = true;
       clearTimeout(flashTimer);
+      for (const fn of viewportCleanups) fn();
       container.innerHTML = "";
     },
     getModel() {
@@ -1367,5 +1495,6 @@ export function mountGraphEditor(container, initial, options = {}) {
         syncChrome();
       }
     },
+    resetView: resetViewTransform,
   };
 }

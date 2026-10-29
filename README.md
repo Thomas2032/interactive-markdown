@@ -17,8 +17,8 @@ License: **MIT** (see [LICENSE](LICENSE)).
 - First-class **`@scrub`** — bind a timer/slider to CSS animation scrubbing on `.im-scrub` (no DIY `animation-delay`)
 - SVG templates with `{{expr}}` bindings
 - Slim `@svg WxH` wrapper for compact markup
-- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **bar / scatter / categorical**, **dual y2 axes**, **zoom/pan**, **log/symlog**, **legends** (position), **`@annotate`**, **parametric/polar**, optional **SVG overlay**, and **hover tooltips**
-- **Graph preview**: `@graph` (**`layout=dagre`** auto-layout), `@node`, and `@edge` (**self-edges**, **corner ports**, **`@lane` / `@group`**; edit the fence source, preview is read-only)
+- **XY plots**: `@plot`, `@axis`, and `@series` with live slider-driven curves, **bar / scatter / categorical**, **dual y2 axes**, **zoom/pan** (default on; `nozoom` to disable), **log/symlog**, **legends** (position), **`@annotate`**, **parametric/polar**, optional **SVG overlay**, and **hover tooltips**
+- **Graph preview**: `@graph` (**`layout=dagre`** auto-layout), `@node`, and `@edge` (**self-edges**, **corner ports**, **`@lane` / `@group`**; edit the fence source, preview is read-only) with **zoom/pan** on the canvas (default on; `nozoom` to disable)
 - **`@data` tables** → plot series (`from=table` qualifies column ids); **`remap` / `px` / `py`** + **`@anchor`** for safer SVG coordinates
 - **Controls inside `@graph` fences** (`@slider` / `@timer` / `@let`) with `@animate quantity=` / `speed=` bound to env names
 - **Shared control env** via `@ns` (same namespace keeps slider/timer values across fences)
@@ -106,7 +106,7 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@ns name` | Share variable state across IVM blocks with the same name |
 | `@svg` | Everything after this line is full SVG markup |
 | `@svg WxH` | Same, but wrap non-root markup in `<svg viewBox="0 0 W H" xmlns=…>` |
-| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom]` | XY plot (optional trailing `@svg` overlay; exclusive of `@graph`) |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom\|nozoom]` | XY plot (optional trailing `@svg` overlay; exclusive of `@graph`; zoom/pan on by default) |
 | `@axis x\|y\|y2: min..max [step=S] [scale=linear\|log\|symlog\|categorical] [cats=A,B] ["Label"]` | Plot axis (use `y2` for dual axis; `cats=` for categorical) |
 | `@series [id] [kind=y\|bar\|scatter\|…] [axis=y\|y2] [marker=…] …` | Plot series (Cartesian, bar, scatter, parametric, or polar) |
 | `@legend pos=top-right\|top-left\|bottom-right\|bottom-left` | Legend placement |
@@ -115,7 +115,7 @@ Fence name: **`ivm`**. Long control names are canonical; short aliases are accep
 | `@data name` + CSV rows | Table → env `name_col` arrays for series / expressions |
 | `@anchor name x=N y=N` | Named point → `name_x` / `name_y` in expressions |
 | `@grid on\|off` | Plot grid toggle |
-| `@graph [layout=dagre\|flow\|layered]` | Start a directed graph (read-only preview); `layout=` auto-places nodes missing both `x=` and `y=` |
+| `@graph [layout=dagre\|flow\|layered] [zoom\|nozoom]` | Start a directed graph (read-only preview); `layout=` auto-places nodes missing both `x=` and `y=`; zoom/pan on by default |
 | `@lane id: "Label" y=N [height=H] [fill=#hex]` | Horizontal swimlane behind nodes |
 | `@group id: "Label"` | Named group; nodes with `group=id` get a bounding box |
 | `@node id: "Label" [x=N] [y=N] kind=K [lane=id] [group=id]` | Node. Omit both `x=`/`y=` when `layout=` is set. `kind` is `action` (default), `input`, `output`, or `decision` |
@@ -145,6 +145,8 @@ Humans and docs should use the long forms. Generators may emit short aliases; bo
 ### Graph
 
 A `@graph` fence is a node-and-edge diagram rendered as a **read-only** preview. Declare nodes and edges (including self-edges and corner ports) in the source. `@slider` / `@timer` / `@let` may share the fence; bind `@animate quantity=name` and `speed=name` to those controls so traveling dots update live. Do not mix `@svg` or `@plot` into a graph fence.
+
+**Zoom / pan (default on):** scroll to zoom toward the cursor, drag empty canvas to pan, double-click empty area to reset. Node coordinates are unchanged (CSS stage transform). Use `@graph nozoom` to disable.
 
 **Auto-layout:** `@graph layout=dagre` (aliases `flow`, `layered`) places nodes that omit **both** `x=` and `y=`. Nodes with either coordinate stay where you put them.
 
@@ -200,14 +202,14 @@ Series `id` or `label="…"` feeds the legend (default on; `nolegend` to hide). 
 
 | Line | Meaning |
 |------|---------|
-| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom]` | Start an XY plot (default 480×320; `zoom` enables wheel zoom / drag pan) |
+| `@plot [WxH] [grid\|nogrid] [legend\|nolegend\|legend=pos] [lockAspect] [zoom\|nozoom]` | Start an XY plot (default 480×320; wheel zoom / drag pan / dblclick reset on by default; `nozoom` to disable) |
 | `@axis x\|y: min..max [step=S] [scale=linear\|log\|symlog] [linthresh=N] ["Label"]` | Axis range, scale, tick step, and title |
 | `@series [id] [kind=…] [from=dataName] [axis=y\|y2] [marker=…] …` | Series style; `from=` qualifies bare `cats=`/`x=`/`y=` column ids as `dataName_col` |
 | `@data name` + header/rows | CSV/table available as `name_col` arrays (and via `from=`) |
 | `@grid on\|off` | Toggle the background grid |
 | `@svg` (after `@plot`) | Overlay markup in the plot viewBox (`0 0 W H`) with `{{expr}}` |
 
-Defaults: grid **on**, legend **on**, fill opacity **0.25**, stroke `#6d28d9`, fill `#7c3aed`, axis scale **linear**, symlog `linthresh` **1**.
+Defaults: grid **on**, legend **on**, **zoom on**, fill opacity **0.25**, stroke `#6d28d9`, fill `#7c3aed`, axis scale **linear**, symlog `linthresh` **1**.
 
 ### Expressions (`{{…}}`)
 

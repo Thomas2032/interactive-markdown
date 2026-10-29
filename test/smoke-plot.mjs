@@ -314,8 +314,17 @@ assert("dual y2", /im-plot-axes-y2/.test(barSvg));
 assert("annotate group", /im-plot-annotate/.test(barSvg) && /peak/.test(barSvg));
 const barSer = serializePlotLines(barP.plot);
 assert("serialize kind=bar", barSer.some((l) => /kind=bar/.test(l)));
-assert("serialize zoom", barSer[0].includes("zoom"));
+assert("serialize omits default zoom", !/\bzoom\b/.test(barSer[0]) && !/\bnozoom\b/.test(barSer[0]), barSer[0]);
 assert("serialize annotate", barSer.some((l) => /^@annotate\b/.test(l)));
+
+const zoomDefault = parseIvm(`@plot\n@axis x: 0..1\n@axis y: 0..1\n@series y = x\n`);
+assert("plot zoom default on", zoomDefault.plot?.zoom === true);
+const zoomOff = parseIvm(`@plot nozoom\n@axis x: 0..1\n@axis y: 0..1\n@series y = x\n`);
+assert("plot nozoom", zoomOff.plot?.zoom === false && zoomOff.errors.length === 0, JSON.stringify(zoomOff.errors));
+const nozSer = serializePlotLines(zoomOff.plot);
+assert("serialize nozoom", /\bnozoom\b/.test(nozSer[0]), nozSer[0]);
+assert("normalize zoom default", normalizePlot({}).zoom === true);
+assert("normalize nozoom", normalizePlot({ zoom: false }).zoom === false);
 
 
 console.log(`\n${passed} passed, ${failed} failed`);

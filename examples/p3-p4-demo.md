@@ -4,10 +4,10 @@ Plot expressiveness (bar / scatter / categorical, legend + annotate, zoom/pan, d
 
 ## Bar + scatter + categorical + dual axis
 
-Scroll to zoom, drag to pan, double-click to reset (`@plot zoom`). Legend sits top-left; callout marks the peak bar.
+Scroll to zoom, drag to pan, double-click to reset (on by default for `@plot` / `@graph`; use `nozoom` to disable). Legend sits top-left; callout marks the peak bar.
 
 ```ivm
-@plot 520x300 zoom legend=top-left
+@plot 520x300 legend=top-left
 @axis x: cats=Jan,Feb,Mar "Month"
 @axis y: 0..80 step=20 "Sales"
 @axis y2: 0..10 step=2 "NPS"
@@ -22,7 +22,7 @@ Scroll to zoom, drag to pan, double-click to reset (`@plot zoom`). Legend sits t
 
 ## Graph lanes + groups
 
-Swimlanes (`@lane`) and a bounding `@group` around related nodes.
+Swimlanes (`@lane`) and a bounding `@group` around related nodes. Scroll to zoom, drag empty canvas to pan, double-click empty area to reset.
 
 ```ivm
 @graph
